@@ -14,6 +14,7 @@ import { SessionsChart } from "./sessions-chart";
 import { Ga4TopTable } from "./ga4-top-table";
 import { LeadsChart } from "./leads-chart";
 import { GbpImpressionsChart, GbpActionsChart } from "./gbp-chart";
+import { HeatmapGrid, HeatmapTrendChart } from "./heatmap-display";
 import type {
   Ga4AiReferrals,
   Ga4Summary,
@@ -21,6 +22,9 @@ import type {
   Ga4TopRow,
   GbpSummary,
   GbpTimeseriesPoint,
+  HeatmapHistoryPoint,
+  HeatmapRunDetail,
+  KeywordWithLatest,
   LeadsByFormRow,
   LeadsSummary,
   LeadsTimeseriesPoint,
@@ -54,6 +58,7 @@ const TABS = [
   { label: "Search", id: "search" },
   { label: "Traffic", id: "traffic" },
   { label: "Profile", id: "profile" },
+  { label: "Local Rank", id: "local-rank" },
   { label: "Leads", id: "leads" },
   { label: "AI Citations", id: "ai-citations" },
 ] as const;
@@ -95,6 +100,7 @@ export function AnalyticsDashboard({ owner, repo }: Props) {
   const [tab, setTab] = useState<(typeof TABS)[number]["id"]>("overview");
   const [granularity, setGranularity] = useState<"day" | "week">("day");
   const [mode, setMode] = useState<"normalized" | "raw">("normalized");
+  const [selectedKeywordId, setSelectedKeywordId] = useState<number | null>(null);
 
   const base = `/api/${owner}/${repo}/analytics`;
   const { data: summaryData } = useSWR<{ summary: Summary | null }>(`${base}/summary?days=${days}`, fetcher);
@@ -138,6 +144,21 @@ export function AnalyticsDashboard({ owner, repo }: Props) {
     summary: GbpSummary | null;
     points: GbpTimeseriesPoint[];
   }>(tab === "profile" ? `${base}/gbp-profile?days=${days}` : null, fetcher);
+  const { data: keywordsData } = useSWR<{ keywords: KeywordWithLatest[] }>(
+    tab === "local-rank" ? `${base}/keywords` : null,
+    fetcher,
+  );
+  const activeKeywordId =
+    selectedKeywordId ?? keywordsData?.keywords.find((k) => k.enabled)?.id ?? null;
+  const { data: heatmapData } = useSWR<{
+    latest: HeatmapRunDetail | null;
+    history: HeatmapHistoryPoint[];
+  }>(
+    tab === "local-rank" && activeKeywordId
+      ? `${base}/heatmap?keywordId=${activeKeywordId}&weeks=12`
+      : null,
+    fetcher,
+  );
 
   const s = summaryData?.summary;
 
@@ -777,6 +798,136 @@ export function AnalyticsDashboard({ owner, repo }: Props) {
                   </p>
                 </CardContent>
               </Card>
+            </>
+          )}
+        </>
+      )}
+
+      {tab === "local-rank" && (
+        <>
+          {!keywordsData ? (
+            <div className="h-32 flex items-center justify-center text-muted-foreground text-sm">Loading…</div>
+          ) : keywordsData.keywords.length === 0 ? (
+            <div className="h-32 flex flex-col items-center justify-center text-center text-muted-foreground text-sm px-4 gap-2">
+              <p>No target keywords configured for this site yet.</p>
+              <a className="underline" href={`/${owner}/${repo}/analytics/settings`}>
+                Add keywords in Settings
+              </a>
+            </div>
+          ) : (
+            <>
+              {/* Keyword picker */}
+              <Card>
+                <CardHeader className="pb-2">
+                  <CardTitle>Target keyword</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="flex flex-wrap gap-2">
+                    {keywordsData.keywords
+                      .filter((k) => k.enabled)
+                      .map((k) => (
+                        <button
+                          key={k.id}
+                          onClick={() => setSelectedKeywordId(k.id)}
+                          className={cn(
+                            "px-3 py-1.5 text-xs rounded-md border transition",
+                            activeKeywordId === k.id
+                              ? "bg-primary text-primary-foreground border-primary"
+                              : "bg-background text-foreground border-border hover:border-foreground/50",
+                          )}
+                        >
+                          {k.keyword}
+                          {k.latestRun?.summary && "averageRank" in k.latestRun.summary && k.latestRun.summary.averageRank != null && (
+                            <span className="ml-2 text-[10px] opacity-70">
+                              avg {Number(k.latestRun.summary.averageRank).toFixed(1)}
+                            </span>
+                          )}
+                        </button>
+                      ))}
+                  </div>
+                </CardContent>
+              </Card>
+
+              {!activeKeywordId || !heatmapData ? (
+                <div className="h-32 flex items-center justify-center text-muted-foreground text-sm">
+                  {activeKeywordId ? "Loading heatmap…" : "Select a keyword above"}
+                </div>
+              ) : !heatmapData.latest ? (
+                <div className="h-32 flex items-center justify-center text-center text-muted-foreground text-sm px-4">
+                  No heat-map runs yet for this keyword. The weekly cron runs Mondays at 02:00 UTC.
+                </div>
+              ) : heatmapData.latest.errorReason ? (
+                <Card>
+                  <CardContent className="py-6">
+                    <p className="text-sm text-red-600">
+                      Latest run failed: <span className="font-medium">{heatmapData.latest.errorReason}</span>
+                    </p>
+                    <p className="text-xs text-muted-foreground mt-2">Run date: {heatmapData.latest.runDate}</p>
+                  </CardContent>
+                </Card>
+              ) : (
+                <>
+                  {/* KPIs */}
+                  {"averageRank" in heatmapData.latest.summary && (
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                      <KpiCard
+                        label="Avg rank"
+                        value={
+                          heatmapData.latest.summary.averageRank != null
+                            ? Number(heatmapData.latest.summary.averageRank).toFixed(1)
+                            : "—"
+                        }
+                        delta={null}
+                        sublabel={`${heatmapData.latest.summary.foundCount}/${heatmapData.latest.summary.totalPoints} cells found`}
+                      />
+                      <KpiCard
+                        label="Top 3 share"
+                        value={`${Number(heatmapData.latest.summary.top3Percent).toFixed(0)}%`}
+                        delta={null}
+                      />
+                      <KpiCard
+                        label="Visibility"
+                        value={`${Number(heatmapData.latest.summary.foundPercent).toFixed(0)}%`}
+                        delta={null}
+                      />
+                      <KpiCard
+                        label="Run date"
+                        value={heatmapData.latest.runDate}
+                        delta={null}
+                      />
+                    </div>
+                  )}
+
+                  {/* Heatmap grid */}
+                  <Card>
+                    <CardHeader className="pb-2">
+                      <CardTitle>Heat map — local rank by location</CardTitle>
+                      <p className="text-xs text-muted-foreground mt-1">
+                        Each cell shows where this business ranks on Google Maps for that geographic point. Hover for top-3 competitors.
+                      </p>
+                    </CardHeader>
+                    <CardContent>
+                      <HeatmapGrid
+                        grid={heatmapData.latest.grid}
+                        gridSize={Math.round(Math.sqrt(heatmapData.latest.summary && "totalPoints" in heatmapData.latest.summary ? heatmapData.latest.summary.totalPoints : heatmapData.latest.grid.length))}
+                      />
+                    </CardContent>
+                  </Card>
+
+                  {/* Trend */}
+                  <Card>
+                    <CardHeader className="pb-2">
+                      <CardTitle>Average rank — last 12 weeks</CardTitle>
+                      <p className="text-xs text-muted-foreground mt-1">
+                        Y-axis is inverted — higher on the chart = better ranking. Green dashed line marks the top-3 threshold.
+                      </p>
+                    </CardHeader>
+                    <CardContent>
+                      <HeatmapTrendChart history={heatmapData.history} />
+                    </CardContent>
+                  </Card>
+                </>
+              )}
             </>
           )}
         </>

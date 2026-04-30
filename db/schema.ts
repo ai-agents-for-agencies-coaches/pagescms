@@ -276,6 +276,45 @@ const analyticsActivityTable = pgTable("analytics_activity", {
     .on(table.siteId, table.date),
 }));
 
+const analyticsSiteKeywordTable = pgTable("analytics_site_keyword", {
+  id: serial("id").primaryKey(),
+  siteId: integer("site_id").notNull().references(() => analyticsSiteTable.id, { onDelete: "cascade" }),
+  keyword: text("keyword").notNull(),
+  // Resolved location for the grid center. Defaults to GBP location's place_id/lat/lng when seeded;
+  // operator can override per-keyword if a different anchor point is needed.
+  placeId: text("place_id"),
+  lat: text("lat"),
+  lng: text("lng"),
+  gridSize: integer("grid_size").notNull().default(5),
+  radius: integer("radius").notNull().default(5),
+  radiusUnits: text("radius_units").notNull().default("km"),
+  shape: text("shape").notNull().default("square"),
+  zoom: integer("zoom").notNull().default(13),
+  enabled: boolean("enabled").notNull().default(true),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+}, table => ({
+  uq_analytics_site_keyword: uniqueIndex("uq_analytics_site_keyword").on(table.siteId, table.keyword),
+  idx_analytics_site_keyword_enabled: index("idx_analytics_site_keyword_enabled").on(table.enabled),
+}));
+
+const analyticsHeatmapRunTable = pgTable("analytics_heatmap_run", {
+  id: serial("id").primaryKey(),
+  siteId: integer("site_id").notNull().references(() => analyticsSiteTable.id, { onDelete: "cascade" }),
+  keywordId: integer("keyword_id").notNull().references(() => analyticsSiteKeywordTable.id, { onDelete: "cascade" }),
+  runDate: text("run_date").notNull(),
+  // summary: { avgRank, top3Share, top10Share, in3PackShare, foundCells, totalCells }
+  // null avgRank means business not found in any cell.
+  summary: jsonb("summary").notNull(),
+  // grid: full RapidAPI response — array of { lat, lng, rank } cells.
+  grid: jsonb("grid").notNull(),
+  errorReason: text("error_reason"),
+  fetchedAt: timestamp("fetched_at").notNull().defaultNow(),
+}, table => ({
+  uq_analytics_heatmap_run: uniqueIndex("uq_analytics_heatmap_run").on(table.siteId, table.keywordId, table.runDate),
+  idx_analytics_heatmap_run_siteId_date: index("idx_analytics_heatmap_run_siteId_date").on(table.siteId, table.runDate),
+}));
+
 export {
   userTable,
   sessionTable,
@@ -292,5 +331,7 @@ export {
   analyticsCredentialTable,
   analyticsDailyTable,
   analyticsDimensionTable,
-  analyticsActivityTable
+  analyticsActivityTable,
+  analyticsSiteKeywordTable,
+  analyticsHeatmapRunTable
 };

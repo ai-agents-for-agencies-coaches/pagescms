@@ -2,8 +2,14 @@ import "server-only";
 
 import { and, desc, eq, gte, lte, sql } from "drizzle-orm";
 import { db } from "@/db";
-import { analyticsDailyTable, analyticsDimensionTable } from "@/db/schema";
+import {
+  analyticsDailyTable,
+  analyticsDimensionTable,
+  analyticsHeatmapRunTable,
+  analyticsSiteKeywordTable,
+} from "@/db/schema";
 import type { AnalyticsProvider } from "./types";
+import type { HeatMapCell, HeatMapSummary } from "./local-rank";
 import { matchAiSurface } from "./ai-sources";
 
 /** YYYY-MM-DD helpers — we store date as TEXT so string compare is correct. */
@@ -944,6 +950,154 @@ export const getGbpTimeseries = async (siteId: number, days: number): Promise<Gb
     out.push(byDate.get(key) ?? emptyGbp(key));
   }
   return out;
+};
+
+/* ─── Local Rank Heat Maps (RapidAPI local-rank-tracker) ─────────────── */
+
+export type KeywordWithLatest = {
+  id: number;
+  keyword: string;
+  enabled: boolean;
+  placeId: string | null;
+  lat: string | null;
+  lng: string | null;
+  gridSize: number;
+  radius: number;
+  radiusUnits: string;
+  shape: string;
+  zoom: number;
+  latestRun: {
+    runDate: string;
+    summary: HeatMapSummary | Record<string, never>;
+    errorReason: string | null;
+  } | null;
+};
+
+export const getKeywords = async (siteId: number): Promise<KeywordWithLatest[]> => {
+  const keywords = await db
+    .select()
+    .from(analyticsSiteKeywordTable)
+    .where(eq(analyticsSiteKeywordTable.siteId, siteId))
+    .orderBy(analyticsSiteKeywordTable.keyword);
+
+  if (keywords.length === 0) return [];
+
+  // Latest run per keyword via DISTINCT ON.
+  const latest = await db.execute(sql`
+    SELECT DISTINCT ON (keyword_id)
+      keyword_id, run_date, summary, error_reason
+    FROM analytics_heatmap_run
+    WHERE site_id = ${siteId}
+    ORDER BY keyword_id, run_date DESC
+  `);
+
+  type LatestRow = { keyword_id: number; run_date: string; summary: unknown; error_reason: string | null };
+  const byKw = new Map<number, LatestRow>();
+  for (const r of latest as unknown as LatestRow[]) {
+    byKw.set(r.keyword_id, r);
+  }
+
+  return keywords.map((k) => {
+    const lr = byKw.get(k.id);
+    return {
+      id: k.id,
+      keyword: k.keyword,
+      enabled: k.enabled,
+      placeId: k.placeId,
+      lat: k.lat,
+      lng: k.lng,
+      gridSize: k.gridSize,
+      radius: k.radius,
+      radiusUnits: k.radiusUnits,
+      shape: k.shape,
+      zoom: k.zoom,
+      latestRun: lr
+        ? {
+            runDate: lr.run_date,
+            summary: lr.summary as HeatMapSummary | Record<string, never>,
+            errorReason: lr.error_reason,
+          }
+        : null,
+    };
+  });
+};
+
+export type HeatmapRunDetail = {
+  id: number;
+  keywordId: number;
+  runDate: string;
+  summary: HeatMapSummary | Record<string, never>;
+  grid: HeatMapCell[];
+  errorReason: string | null;
+  fetchedAt: string;
+};
+
+export const getLatestHeatMap = async (
+  siteId: number,
+  keywordId: number,
+): Promise<HeatmapRunDetail | null> => {
+  const rows = await db
+    .select()
+    .from(analyticsHeatmapRunTable)
+    .where(
+      and(
+        eq(analyticsHeatmapRunTable.siteId, siteId),
+        eq(analyticsHeatmapRunTable.keywordId, keywordId),
+      ),
+    )
+    .orderBy(desc(analyticsHeatmapRunTable.runDate))
+    .limit(1);
+
+  const r = rows[0];
+  if (!r) return null;
+  return {
+    id: r.id,
+    keywordId: r.keywordId,
+    runDate: r.runDate,
+    summary: r.summary as HeatMapSummary | Record<string, never>,
+    grid: r.grid as HeatMapCell[],
+    errorReason: r.errorReason,
+    fetchedAt: r.fetchedAt.toISOString(),
+  };
+};
+
+export type HeatmapHistoryPoint = {
+  runDate: string;
+  averageRank: number | null;
+  foundPercent: number;
+  top3Percent: number;
+};
+
+export const getHeatMapHistory = async (
+  siteId: number,
+  keywordId: number,
+  weeks: number = 12,
+): Promise<HeatmapHistoryPoint[]> => {
+  const rows = await db
+    .select({
+      runDate: analyticsHeatmapRunTable.runDate,
+      averageRank: sql<number | null>`(${analyticsHeatmapRunTable.summary}->>'averageRank')::numeric`,
+      foundPercent: sql<number>`coalesce((${analyticsHeatmapRunTable.summary}->>'foundPercent')::numeric, 0)`,
+      top3Percent: sql<number>`coalesce((${analyticsHeatmapRunTable.summary}->>'top3Percent')::numeric, 0)`,
+    })
+    .from(analyticsHeatmapRunTable)
+    .where(
+      and(
+        eq(analyticsHeatmapRunTable.siteId, siteId),
+        eq(analyticsHeatmapRunTable.keywordId, keywordId),
+      ),
+    )
+    .orderBy(desc(analyticsHeatmapRunTable.runDate))
+    .limit(weeks);
+
+  return rows
+    .map((r) => ({
+      runDate: r.runDate,
+      averageRank: r.averageRank != null ? Number(r.averageRank) : null,
+      foundPercent: Number(r.foundPercent),
+      top3Percent: Number(r.top3Percent),
+    }))
+    .reverse();
 };
 
 export const getLeadsByForm = async (siteId: number, days: number): Promise<LeadsByFormRow[]> => {

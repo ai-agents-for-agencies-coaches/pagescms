@@ -23,6 +23,7 @@ import type {
 } from "@/lib/analytics/types";
 import { PROVIDER_LABELS } from "@/lib/analytics/types";
 import { GbpConnectCard } from "@/components/analytics/gbp-connect-card";
+import { KeywordManager } from "@/components/analytics/keyword-manager";
 
 type Props = {
   owner: string;
@@ -321,6 +322,8 @@ export function AnalyticsSettingsForm({ owner, repo, initialSite }: Props) {
         initialLocationName={initialSite?.gbpLocationName ?? null}
         initialConnectedAt={initialSite?.gbpConnectedAt ?? null}
       />
+
+      <KeywordManager owner={owner} repo={repo} />
 
       <Card>
         <CardHeader>
