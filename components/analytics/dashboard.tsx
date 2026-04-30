@@ -14,7 +14,8 @@ import { SessionsChart } from "./sessions-chart";
 import { Ga4TopTable } from "./ga4-top-table";
 import { LeadsChart } from "./leads-chart";
 import { GbpImpressionsChart, GbpActionsChart } from "./gbp-chart";
-import { HeatmapGrid, HeatmapTrendChart } from "./heatmap-display";
+import { HeatmapTrendChart } from "./heatmap-display";
+import { HeatmapMap } from "./heatmap-map";
 import type {
   Ga4AiReferrals,
   Ga4Summary,
@@ -898,19 +899,17 @@ export function AnalyticsDashboard({ owner, repo }: Props) {
                     </div>
                   )}
 
-                  {/* Heatmap grid */}
+                  {/* Heatmap on Google Maps */}
                   <Card>
                     <CardHeader className="pb-2">
                       <CardTitle>Heat map — local rank by location</CardTitle>
                       <p className="text-xs text-muted-foreground mt-1">
-                        Each cell shows where this business ranks on Google Maps for that geographic point. Hover for top-3 competitors.
+                        Each pin marks one geographic point in the search grid. Color shows where this business ranks
+                        on Google Maps from that location. Click a pin for the top-3 competitors at that point.
                       </p>
                     </CardHeader>
                     <CardContent>
-                      <HeatmapGrid
-                        grid={heatmapData.latest.grid}
-                        gridSize={Math.round(Math.sqrt(heatmapData.latest.summary && "totalPoints" in heatmapData.latest.summary ? heatmapData.latest.summary.totalPoints : heatmapData.latest.grid.length))}
-                      />
+                      <HeatmapMap cells={heatmapData.latest.grid} />
                     </CardContent>
                   </Card>
 
