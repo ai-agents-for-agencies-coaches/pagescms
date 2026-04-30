@@ -104,7 +104,7 @@ export function HeatmapMap({ cells, anchor }: Props) {
                       text,
                     )}
                   >
-                    {c.rank ?? "—"}
+                    {c.rank ?? "21+"}
                   </div>
                 </AdvancedMarker>
               );
@@ -119,7 +119,7 @@ export function HeatmapMap({ cells, anchor }: Props) {
                 <div className="text-xs space-y-1 max-w-[260px]">
                   <div className="font-semibold">
                     {openCell.rank == null ? (
-                      <span>Not in top results</span>
+                      <span>Rank 21+ <span className="text-slate-500 font-normal">(not in top 20)</span></span>
                     ) : (
                       <span>Rank: {openCell.rank}</span>
                     )}
@@ -161,7 +161,7 @@ export function HeatmapMap({ cells, anchor }: Props) {
           <span className="inline-block w-3 h-3 rounded-full bg-red-500" /> 21+
         </span>
         <span className="flex items-center gap-1">
-          <span className="inline-block w-3 h-3 rounded-full bg-slate-400" /> not found
+          <span className="inline-block w-3 h-3 rounded-full bg-slate-400" /> 21+
         </span>
       </div>
     </div>
