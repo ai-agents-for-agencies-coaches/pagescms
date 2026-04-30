@@ -9,7 +9,7 @@ export type AnalyticsProvider =
   | "gbp";
 
 /** Providers that produce time-series metrics rows in analytics_daily / analytics_dimension. */
-export type MetricsProvider = Exclude<AnalyticsProvider, "gbp">;
+export type MetricsProvider = AnalyticsProvider;
 
 export type LlmPlatform = "google" | "chat_gpt";
 
@@ -102,6 +102,18 @@ export type LlmMentionsMetrics = {
   uniqueCitedUrls: number;
 };
 
+export type GbpMetrics = {
+  impressionsDesktopSearch: number;
+  impressionsMobileSearch: number;
+  impressionsDesktopMaps: number;
+  impressionsMobileMaps: number;
+  callClicks: number;
+  websiteClicks: number;
+  directionRequests: number;
+  conversations: number;
+  bookings: number;
+};
+
 export type ProviderMetrics = {
   gsc: GscMetrics;
   bing: BingMetrics;
@@ -110,6 +122,7 @@ export type ProviderMetrics = {
   whatconverts: WhatConvertsMetrics;
   netlify_forms: NetlifyFormsMetrics;
   llm_mentions: LlmMentionsMetrics;
+  gbp: GbpMetrics;
 };
 
 export type AnalyticsDailyRow<P extends MetricsProvider = MetricsProvider> = {

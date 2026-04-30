@@ -784,6 +784,168 @@ export const getLeadsTimeseries = async (siteId: number, days: number): Promise<
   return out;
 };
 
+/* ─── Google Business Profile (Performance API) ───────────────────────── */
+
+export type GbpSummaryMetrics = {
+  searchImpressions: number;
+  mapsImpressions: number;
+  totalImpressions: number;
+  callClicks: number;
+  websiteClicks: number;
+  directionRequests: number;
+  conversations: number;
+  bookings: number;
+  totalActions: number;
+};
+
+export type GbpSummary = {
+  window: { start: string; end: string };
+  prior: { start: string; end: string };
+  current: GbpSummaryMetrics;
+  previous: GbpSummaryMetrics;
+  delta: Record<keyof GbpSummaryMetrics, number>;
+};
+
+const gbpAggregate = async (siteId: number, start: string, end: string): Promise<GbpSummaryMetrics> => {
+  const m = analyticsDailyTable.metrics;
+  const rows = await db
+    .select({
+      impressionsDesktopSearch: sql<number>`coalesce(sum((${m}->>'impressionsDesktopSearch')::int), 0)`,
+      impressionsMobileSearch: sql<number>`coalesce(sum((${m}->>'impressionsMobileSearch')::int), 0)`,
+      impressionsDesktopMaps: sql<number>`coalesce(sum((${m}->>'impressionsDesktopMaps')::int), 0)`,
+      impressionsMobileMaps: sql<number>`coalesce(sum((${m}->>'impressionsMobileMaps')::int), 0)`,
+      callClicks: sql<number>`coalesce(sum((${m}->>'callClicks')::int), 0)`,
+      websiteClicks: sql<number>`coalesce(sum((${m}->>'websiteClicks')::int), 0)`,
+      directionRequests: sql<number>`coalesce(sum((${m}->>'directionRequests')::int), 0)`,
+      conversations: sql<number>`coalesce(sum((${m}->>'conversations')::int), 0)`,
+      bookings: sql<number>`coalesce(sum((${m}->>'bookings')::int), 0)`,
+    })
+    .from(analyticsDailyTable)
+    .where(
+      and(
+        eq(analyticsDailyTable.siteId, siteId),
+        eq(analyticsDailyTable.provider, "gbp"),
+        gte(analyticsDailyTable.date, start),
+        lte(analyticsDailyTable.date, end),
+      ),
+    );
+  const r = rows[0];
+  const searchImpressions = Number(r?.impressionsDesktopSearch ?? 0) + Number(r?.impressionsMobileSearch ?? 0);
+  const mapsImpressions = Number(r?.impressionsDesktopMaps ?? 0) + Number(r?.impressionsMobileMaps ?? 0);
+  const callClicks = Number(r?.callClicks ?? 0);
+  const websiteClicks = Number(r?.websiteClicks ?? 0);
+  const directionRequests = Number(r?.directionRequests ?? 0);
+  const conversations = Number(r?.conversations ?? 0);
+  const bookings = Number(r?.bookings ?? 0);
+  return {
+    searchImpressions,
+    mapsImpressions,
+    totalImpressions: searchImpressions + mapsImpressions,
+    callClicks,
+    websiteClicks,
+    directionRequests,
+    conversations,
+    bookings,
+    totalActions: callClicks + websiteClicks + directionRequests + conversations + bookings,
+  };
+};
+
+export const getGbpSummary = async (siteId: number, days: number): Promise<GbpSummary> => {
+  const w = getWindow(days);
+  const [current, previous] = await Promise.all([
+    gbpAggregate(siteId, w.start, w.end),
+    gbpAggregate(siteId, w.priorStart, w.priorEnd),
+  ]);
+  const delta: Record<keyof GbpSummaryMetrics, number> = {
+    searchImpressions: pct(current.searchImpressions, previous.searchImpressions),
+    mapsImpressions: pct(current.mapsImpressions, previous.mapsImpressions),
+    totalImpressions: pct(current.totalImpressions, previous.totalImpressions),
+    callClicks: pct(current.callClicks, previous.callClicks),
+    websiteClicks: pct(current.websiteClicks, previous.websiteClicks),
+    directionRequests: pct(current.directionRequests, previous.directionRequests),
+    conversations: pct(current.conversations, previous.conversations),
+    bookings: pct(current.bookings, previous.bookings),
+    totalActions: pct(current.totalActions, previous.totalActions),
+  };
+  return {
+    window: { start: w.start, end: w.end },
+    prior: { start: w.priorStart, end: w.priorEnd },
+    current,
+    previous,
+    delta,
+  };
+};
+
+export type GbpTimeseriesPoint = {
+  date: string;
+  searchImpressions: number;
+  mapsImpressions: number;
+  callClicks: number;
+  websiteClicks: number;
+  directionRequests: number;
+  conversations: number;
+  bookings: number;
+};
+
+const emptyGbp = (date: string): GbpTimeseriesPoint => ({
+  date,
+  searchImpressions: 0,
+  mapsImpressions: 0,
+  callClicks: 0,
+  websiteClicks: 0,
+  directionRequests: 0,
+  conversations: 0,
+  bookings: 0,
+});
+
+export const getGbpTimeseries = async (siteId: number, days: number): Promise<GbpTimeseriesPoint[]> => {
+  const w = getWindow(days);
+  const m = analyticsDailyTable.metrics;
+  const rows = await db
+    .select({
+      date: analyticsDailyTable.date,
+      impressionsDesktopSearch: sql<number>`coalesce((${m}->>'impressionsDesktopSearch')::int, 0)`,
+      impressionsMobileSearch: sql<number>`coalesce((${m}->>'impressionsMobileSearch')::int, 0)`,
+      impressionsDesktopMaps: sql<number>`coalesce((${m}->>'impressionsDesktopMaps')::int, 0)`,
+      impressionsMobileMaps: sql<number>`coalesce((${m}->>'impressionsMobileMaps')::int, 0)`,
+      callClicks: sql<number>`coalesce((${m}->>'callClicks')::int, 0)`,
+      websiteClicks: sql<number>`coalesce((${m}->>'websiteClicks')::int, 0)`,
+      directionRequests: sql<number>`coalesce((${m}->>'directionRequests')::int, 0)`,
+      conversations: sql<number>`coalesce((${m}->>'conversations')::int, 0)`,
+      bookings: sql<number>`coalesce((${m}->>'bookings')::int, 0)`,
+    })
+    .from(analyticsDailyTable)
+    .where(
+      and(
+        eq(analyticsDailyTable.siteId, siteId),
+        eq(analyticsDailyTable.provider, "gbp"),
+        gte(analyticsDailyTable.date, w.start),
+        lte(analyticsDailyTable.date, w.end),
+      ),
+    )
+    .orderBy(analyticsDailyTable.date);
+
+  const byDate = new Map<string, GbpTimeseriesPoint>();
+  for (const r of rows) {
+    byDate.set(r.date, {
+      date: r.date,
+      searchImpressions: Number(r.impressionsDesktopSearch ?? 0) + Number(r.impressionsMobileSearch ?? 0),
+      mapsImpressions: Number(r.impressionsDesktopMaps ?? 0) + Number(r.impressionsMobileMaps ?? 0),
+      callClicks: Number(r.callClicks ?? 0),
+      websiteClicks: Number(r.websiteClicks ?? 0),
+      directionRequests: Number(r.directionRequests ?? 0),
+      conversations: Number(r.conversations ?? 0),
+      bookings: Number(r.bookings ?? 0),
+    });
+  }
+  const out: GbpTimeseriesPoint[] = [];
+  for (let d = new Date(w.start); fmt(d) <= w.end; d = addDays(d, 1)) {
+    const key = fmt(d);
+    out.push(byDate.get(key) ?? emptyGbp(key));
+  }
+  return out;
+};
+
 export const getLeadsByForm = async (siteId: number, days: number): Promise<LeadsByFormRow[]> => {
   const w = getWindow(days);
   const rows = await db

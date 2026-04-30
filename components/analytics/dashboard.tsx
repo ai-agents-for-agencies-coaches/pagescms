@@ -13,11 +13,14 @@ import { TopTable } from "./top-table";
 import { SessionsChart } from "./sessions-chart";
 import { Ga4TopTable } from "./ga4-top-table";
 import { LeadsChart } from "./leads-chart";
+import { GbpImpressionsChart, GbpActionsChart } from "./gbp-chart";
 import type {
   Ga4AiReferrals,
   Ga4Summary,
   Ga4TimeseriesPoint,
   Ga4TopRow,
+  GbpSummary,
+  GbpTimeseriesPoint,
   LeadsByFormRow,
   LeadsSummary,
   LeadsTimeseriesPoint,
@@ -50,6 +53,7 @@ const TABS = [
   { label: "Activity", id: "activity" },
   { label: "Search", id: "search" },
   { label: "Traffic", id: "traffic" },
+  { label: "Profile", id: "profile" },
   { label: "Leads", id: "leads" },
   { label: "AI Citations", id: "ai-citations" },
 ] as const;
@@ -128,6 +132,12 @@ export function AnalyticsDashboard({ owner, repo }: Props) {
     tab === "activity" ? `${base}/activity?days=${days}` : null,
     fetcher,
   );
+  const { data: gbpData } = useSWR<{
+    connected: boolean;
+    locationName: string | null;
+    summary: GbpSummary | null;
+    points: GbpTimeseriesPoint[];
+  }>(tab === "profile" ? `${base}/gbp-profile?days=${days}` : null, fetcher);
 
   const s = summaryData?.summary;
 
@@ -656,6 +666,118 @@ export function AnalyticsDashboard({ owner, repo }: Props) {
             <div className="h-32 flex items-center justify-center text-muted-foreground text-sm">
               {trafficData === undefined ? "Loading…" : "No GA4 data yet. Configure a property ID in Settings."}
             </div>
+          )}
+        </>
+      )}
+
+      {tab === "profile" && (
+        <>
+          {!gbpData ? (
+            <div className="h-32 flex items-center justify-center text-muted-foreground text-sm">Loading…</div>
+          ) : !gbpData.connected ? (
+            <div className="h-32 flex flex-col items-center justify-center text-center text-muted-foreground text-sm px-4 gap-2">
+              <p>Google Business Profile is not connected for this site.</p>
+              <a className="underline" href={`/${owner}/${repo}/analytics/settings`}>
+                Connect it in Settings
+              </a>
+            </div>
+          ) : !gbpData.summary || gbpData.summary.current.totalImpressions + gbpData.summary.current.totalActions === 0 ? (
+            <div className="h-32 flex items-center justify-center text-center text-muted-foreground text-sm px-4">
+              No GBP performance data in this window yet. Initial sync backfills 90 days; daily refreshes run at 04:00 UTC.
+              GBP data lags ~3 days.
+            </div>
+          ) : (
+            <>
+              {gbpData.locationName && (
+                <p className="text-xs text-muted-foreground">
+                  Location: <span className="font-medium">{gbpData.locationName}</span>
+                </p>
+              )}
+
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <KpiCard
+                  label="Search impressions"
+                  value={formatNumber(gbpData.summary.current.searchImpressions)}
+                  delta={gbpData.summary.delta.searchImpressions}
+                  priorValue={formatNumber(gbpData.summary.previous.searchImpressions)}
+                />
+                <KpiCard
+                  label="Maps impressions"
+                  value={formatNumber(gbpData.summary.current.mapsImpressions)}
+                  delta={gbpData.summary.delta.mapsImpressions}
+                  priorValue={formatNumber(gbpData.summary.previous.mapsImpressions)}
+                />
+                <KpiCard
+                  label="Calls"
+                  value={formatNumber(gbpData.summary.current.callClicks)}
+                  delta={gbpData.summary.delta.callClicks}
+                  priorValue={formatNumber(gbpData.summary.previous.callClicks)}
+                />
+                <KpiCard
+                  label="Website clicks"
+                  value={formatNumber(gbpData.summary.current.websiteClicks)}
+                  delta={gbpData.summary.delta.websiteClicks}
+                  priorValue={formatNumber(gbpData.summary.previous.websiteClicks)}
+                />
+                <KpiCard
+                  label="Direction requests"
+                  value={formatNumber(gbpData.summary.current.directionRequests)}
+                  delta={gbpData.summary.delta.directionRequests}
+                  priorValue={formatNumber(gbpData.summary.previous.directionRequests)}
+                />
+                {(gbpData.summary.current.conversations > 0 || gbpData.summary.previous.conversations > 0) && (
+                  <KpiCard
+                    label="Messages"
+                    value={formatNumber(gbpData.summary.current.conversations)}
+                    delta={gbpData.summary.delta.conversations}
+                    priorValue={formatNumber(gbpData.summary.previous.conversations)}
+                  />
+                )}
+                {(gbpData.summary.current.bookings > 0 || gbpData.summary.previous.bookings > 0) && (
+                  <KpiCard
+                    label="Bookings"
+                    value={formatNumber(gbpData.summary.current.bookings)}
+                    delta={gbpData.summary.delta.bookings}
+                    priorValue={formatNumber(gbpData.summary.previous.bookings)}
+                  />
+                )}
+                <KpiCard
+                  label="Total actions"
+                  value={formatNumber(gbpData.summary.current.totalActions)}
+                  delta={gbpData.summary.delta.totalActions}
+                  priorValue={formatNumber(gbpData.summary.previous.totalActions)}
+                />
+              </div>
+
+              <Card>
+                <CardHeader className="flex-row items-center justify-between space-y-0 pb-2 gap-3 flex-wrap">
+                  <CardTitle>Impressions — Search vs Maps</CardTitle>
+                  <Pills
+                    options={[
+                      { label: "Daily", value: "day" },
+                      { label: "Weekly", value: "week" },
+                    ] as const}
+                    value={granularity}
+                    onChange={setGranularity}
+                  />
+                </CardHeader>
+                <CardContent>
+                  <GbpImpressionsChart points={gbpData.points} granularity={granularity} />
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader className="pb-2">
+                  <CardTitle>Customer actions</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <GbpActionsChart points={gbpData.points} granularity={granularity} />
+                  <p className="text-xs text-muted-foreground mt-2">
+                    GBP performance data lags ~3 days. Messages and Bookings appear only when the location has those features enabled.
+                  </p>
+                </CardContent>
+              </Card>
+            </>
           )}
         </>
       )}
