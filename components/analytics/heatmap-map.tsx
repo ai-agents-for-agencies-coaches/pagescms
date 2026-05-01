@@ -12,11 +12,11 @@ import { cn } from "@/lib/utils";
 import type { HeatMapCell } from "@/lib/analytics/local-rank";
 
 const cellColor = (rank: number | null): { bg: string; text: string } => {
-  if (rank == null) return { bg: "bg-slate-400", text: "text-white" };
+  if (rank == null) return { bg: "bg-red-800", text: "text-white" };
   if (rank <= 3) return { bg: "bg-green-500", text: "text-white" };
   if (rank <= 10) return { bg: "bg-yellow-400", text: "text-slate-900" };
   if (rank <= 20) return { bg: "bg-orange-500", text: "text-white" };
-  return { bg: "bg-red-500", text: "text-white" };
+  return { bg: "bg-red-800", text: "text-white" };
 };
 
 type Props = {
@@ -158,10 +158,7 @@ export function HeatmapMap({ cells, anchor }: Props) {
           <span className="inline-block w-3 h-3 rounded-full bg-orange-500" /> 11–20
         </span>
         <span className="flex items-center gap-1">
-          <span className="inline-block w-3 h-3 rounded-full bg-red-500" /> 21+
-        </span>
-        <span className="flex items-center gap-1">
-          <span className="inline-block w-3 h-3 rounded-full bg-slate-400" /> 21+
+          <span className="inline-block w-3 h-3 rounded-full bg-red-800" /> 21+
         </span>
       </div>
     </div>

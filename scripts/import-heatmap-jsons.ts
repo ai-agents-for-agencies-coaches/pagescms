@@ -142,18 +142,13 @@ const main = async () => {
         })
         .returning({ id: analyticsSiteKeywordTable.id });
 
-      // Translate legacy stats → new summary shape.
-      const totalPoints = kwEntry.stats.totalPoints ?? kwEntry.grid.length;
-      const foundCount = kwEntry.stats.foundCount ?? 0;
-      const foundPercent =
-        kwEntry.stats.visibility != null
-          ? kwEntry.stats.visibility * (kwEntry.stats.visibility <= 1 ? 100 : 1)
-          : (foundCount / Math.max(1, totalPoints)) * 100;
-      const top3Count = kwEntry.stats.top3Count ?? 0;
-      const top3Percent =
-        kwEntry.stats.apiTop3Percent != null
-          ? kwEntry.stats.apiTop3Percent
-          : (top3Count / Math.max(1, totalPoints)) * 100;
+      // Always derive summary stats from the actual grid — the legacy `stats.visibility`
+      // field is unreliable (some snapshots used it for top-3 visibility, not any-rank).
+      const totalPoints = kwEntry.grid.length;
+      const foundCount = kwEntry.grid.filter((c) => c.position != null).length;
+      const foundPercent = totalPoints > 0 ? (foundCount / totalPoints) * 100 : 0;
+      const top3Count = kwEntry.grid.filter((c) => c.position != null && c.position <= 3).length;
+      const top3Percent = totalPoints > 0 ? (top3Count / totalPoints) * 100 : 0;
 
       // Penalty-based average — null cells count as rank 21 so the metric correctly
       // worsens with invisibility and improves as the business starts ranking.
