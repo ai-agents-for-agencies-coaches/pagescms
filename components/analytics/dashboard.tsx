@@ -102,6 +102,9 @@ export function AnalyticsDashboard({ owner, repo }: Props) {
   const [granularity, setGranularity] = useState<"day" | "week">("day");
   const [mode, setMode] = useState<"normalized" | "raw">("normalized");
   const [selectedKeywordId, setSelectedKeywordId] = useState<number | null>(null);
+  const [compareMode, setCompareMode] = useState(false);
+  const [leftRunDate, setLeftRunDate] = useState<string | null>(null);
+  const [rightRunDate, setRightRunDate] = useState<string | null>(null);
 
   const base = `/api/${owner}/${repo}/analytics`;
   const { data: summaryData } = useSWR<{ summary: Summary | null }>(`${base}/summary?days=${days}`, fetcher);
@@ -157,6 +160,18 @@ export function AnalyticsDashboard({ owner, repo }: Props) {
   }>(
     tab === "local-rank" && activeKeywordId
       ? `${base}/heatmap?keywordId=${activeKeywordId}&weeks=12`
+      : null,
+    fetcher,
+  );
+  const { data: leftHeatmap } = useSWR<{ latest: HeatmapRunDetail | null }>(
+    compareMode && activeKeywordId && leftRunDate
+      ? `${base}/heatmap?keywordId=${activeKeywordId}&runDate=${leftRunDate}`
+      : null,
+    fetcher,
+  );
+  const { data: rightHeatmap } = useSWR<{ latest: HeatmapRunDetail | null }>(
+    compareMode && activeKeywordId && rightRunDate
+      ? `${base}/heatmap?keywordId=${activeKeywordId}&runDate=${rightRunDate}`
       : null,
     fetcher,
   );
@@ -901,15 +916,72 @@ export function AnalyticsDashboard({ owner, repo }: Props) {
 
                   {/* Heatmap on Google Maps */}
                   <Card>
-                    <CardHeader className="pb-2">
-                      <CardTitle>Heat map — local rank by location</CardTitle>
-                      <p className="text-xs text-muted-foreground mt-1">
-                        Each pin marks one geographic point in the search grid. Color shows where this business ranks
-                        on Google Maps from that location. Click a pin for the top-3 competitors at that point.
-                      </p>
+                    <CardHeader className="flex-row items-start justify-between space-y-0 gap-3 pb-2 flex-wrap">
+                      <div>
+                        <CardTitle>Heat map — local rank by location</CardTitle>
+                        <p className="text-xs text-muted-foreground mt-1">
+                          Each pin marks a geographic point in the search grid. Color shows local rank from that location.
+                        </p>
+                      </div>
+                      {heatmapData.history.length >= 2 && (
+                        <Pills
+                          options={[
+                            { label: "Single", value: "single" },
+                            { label: "Compare runs", value: "compare" },
+                          ] as const}
+                          value={compareMode ? "compare" : "single"}
+                          onChange={(v) => {
+                            const next = v === "compare";
+                            setCompareMode(next);
+                            if (next) {
+                              setLeftRunDate(heatmapData.history[0]?.runDate ?? null);
+                              setRightRunDate(
+                                heatmapData.history[heatmapData.history.length - 1]?.runDate ?? null,
+                              );
+                            }
+                          }}
+                        />
+                      )}
                     </CardHeader>
                     <CardContent>
-                      <HeatmapMap cells={heatmapData.latest.grid} />
+                      {!compareMode ? (
+                        <HeatmapMap cells={heatmapData.latest.grid} />
+                      ) : (
+                        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                          {([
+                            { side: "left", date: leftRunDate, setDate: setLeftRunDate, data: leftHeatmap },
+                            { side: "right", date: rightRunDate, setDate: setRightRunDate, data: rightHeatmap },
+                          ] as const).map(({ side, date, setDate, data }) => (
+                            <div key={side} className="space-y-2">
+                              <div className="flex items-center gap-2">
+                                <label className="text-xs text-muted-foreground">Run date:</label>
+                                <select
+                                  className="text-xs rounded border border-border bg-background px-2 py-1"
+                                  value={date ?? ""}
+                                  onChange={(e) => setDate(e.target.value || null)}
+                                >
+                                  {heatmapData.history.map((h) => (
+                                    <option key={h.runDate} value={h.runDate}>
+                                      {h.runDate} · avg {h.averageRank?.toFixed(1) ?? "—"} · {Math.round(h.foundPercent)}% visible
+                                    </option>
+                                  ))}
+                                </select>
+                              </div>
+                              {!data ? (
+                                <div className="h-[500px] rounded-md border bg-muted/30 flex items-center justify-center text-sm text-muted-foreground">
+                                  Loading…
+                                </div>
+                              ) : !data.latest ? (
+                                <div className="h-[500px] rounded-md border bg-muted/30 flex items-center justify-center text-sm text-muted-foreground">
+                                  No run on {date}
+                                </div>
+                              ) : (
+                                <HeatmapMap cells={data.latest.grid} />
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      )}
                     </CardContent>
                   </Card>
 

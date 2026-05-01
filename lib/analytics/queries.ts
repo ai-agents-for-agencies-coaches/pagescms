@@ -1032,6 +1032,18 @@ export type HeatmapRunDetail = {
   fetchedAt: string;
 };
 
+const heatmapRunRowToDetail = (
+  r: typeof analyticsHeatmapRunTable.$inferSelect,
+): HeatmapRunDetail => ({
+  id: r.id,
+  keywordId: r.keywordId,
+  runDate: r.runDate,
+  summary: r.summary as HeatMapSummary | Record<string, never>,
+  grid: r.grid as HeatMapCell[],
+  errorReason: r.errorReason,
+  fetchedAt: r.fetchedAt.toISOString(),
+});
+
 export const getLatestHeatMap = async (
   siteId: number,
   keywordId: number,
@@ -1048,17 +1060,27 @@ export const getLatestHeatMap = async (
     .orderBy(desc(analyticsHeatmapRunTable.runDate))
     .limit(1);
 
-  const r = rows[0];
-  if (!r) return null;
-  return {
-    id: r.id,
-    keywordId: r.keywordId,
-    runDate: r.runDate,
-    summary: r.summary as HeatMapSummary | Record<string, never>,
-    grid: r.grid as HeatMapCell[],
-    errorReason: r.errorReason,
-    fetchedAt: r.fetchedAt.toISOString(),
-  };
+  return rows[0] ? heatmapRunRowToDetail(rows[0]) : null;
+};
+
+export const getHeatMapForRun = async (
+  siteId: number,
+  keywordId: number,
+  runDate: string,
+): Promise<HeatmapRunDetail | null> => {
+  const rows = await db
+    .select()
+    .from(analyticsHeatmapRunTable)
+    .where(
+      and(
+        eq(analyticsHeatmapRunTable.siteId, siteId),
+        eq(analyticsHeatmapRunTable.keywordId, keywordId),
+        eq(analyticsHeatmapRunTable.runDate, runDate),
+      ),
+    )
+    .limit(1);
+
+  return rows[0] ? heatmapRunRowToDetail(rows[0]) : null;
 };
 
 export type HeatmapHistoryPoint = {

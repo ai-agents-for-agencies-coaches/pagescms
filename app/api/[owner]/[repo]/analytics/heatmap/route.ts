@@ -2,7 +2,11 @@ export const maxDuration = 30;
 
 import { type NextRequest, NextResponse } from "next/server";
 import { getRepoAnalyticsContext } from "@/lib/analytics/repo-context";
-import { getLatestHeatMap, getHeatMapHistory } from "@/lib/analytics/queries";
+import {
+  getLatestHeatMap,
+  getHeatMapForRun,
+  getHeatMapHistory,
+} from "@/lib/analytics/queries";
 import { toErrorResponse } from "@/lib/api-error";
 
 const parseInt10 = (s: string | null, fallback: number): number => {
@@ -30,9 +34,12 @@ export async function GET(
     }
 
     const weeks = parseInt10(request.nextUrl.searchParams.get("weeks"), 12);
+    const runDate = request.nextUrl.searchParams.get("runDate");
 
     const [latest, history] = await Promise.all([
-      getLatestHeatMap(site.id, keywordId),
+      runDate
+        ? getHeatMapForRun(site.id, keywordId, runDate)
+        : getLatestHeatMap(site.id, keywordId),
       getHeatMapHistory(site.id, keywordId, weeks),
     ]);
 
