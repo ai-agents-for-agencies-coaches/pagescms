@@ -112,13 +112,26 @@ export const fetchHeatMap = async (params: FetchHeatMapParams): Promise<HeatMapR
   }
 
   const d = json.data;
+
+  // Average rank across ALL cells, treating not-found as rank 21 (one past the API's
+  // top-20 cap — same threshold as the UI's "21+" label). Using the visible-only
+  // average (d.average_rank) gives misleading results: when a business starts ranking
+  // in previously-invisible cells, the visible-only average can go UP (worse-looking)
+  // even though visibility is improving. The all-cells average correctly trends DOWN
+  // as the business gains visibility.
+  const NOT_FOUND_PENALTY = 21;
+  const allRanks = d.results.map((c) => (c.found ? c.rank : NOT_FOUND_PENALTY));
+  const averageRank =
+    allRanks.length > 0 ? allRanks.reduce((s, r) => s + r, 0) / allRanks.length : null;
+
   return {
     summary: {
       totalPoints: d.points,
       foundCount: d.found,
       foundPercent: d.found_percent,
-      averageRank: d.found > 0 ? d.average_rank : null,
-      averageTotalRank: d.found > 0 ? d.average_total_rank : null,
+      averageRank,
+      // Kept for backward compat with imported legacy snapshots that had it; mirrors averageRank now.
+      averageTotalRank: averageRank,
       top3Percent: d.top_3_rank_percent,
     },
     grid: d.results.map((cell) => ({

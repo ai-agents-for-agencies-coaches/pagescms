@@ -155,12 +155,19 @@ const main = async () => {
           ? kwEntry.stats.apiTop3Percent
           : (top3Count / Math.max(1, totalPoints)) * 100;
 
+      // Penalty-based average — null cells count as rank 21 so the metric correctly
+      // worsens with invisibility and improves as the business starts ranking.
+      const NOT_FOUND_PENALTY = 21;
+      const ranks = kwEntry.grid.map((c) => c.position ?? NOT_FOUND_PENALTY);
+      const averageRank =
+        ranks.length > 0 ? ranks.reduce((s, r) => s + r, 0) / ranks.length : null;
+
       const summary = {
         totalPoints,
         foundCount,
         foundPercent,
-        averageRank: kwEntry.stats.averageRank ?? null,
-        averageTotalRank: kwEntry.stats.apiAverageRank ?? kwEntry.stats.averageRank ?? null,
+        averageRank,
+        averageTotalRank: averageRank,
         top3Percent,
       };
 
