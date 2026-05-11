@@ -5,6 +5,7 @@ import { db } from "@/db";
 import { analyticsCredentialTable, analyticsSiteTable } from "@/db/schema";
 import { decrypt, encrypt } from "@/lib/crypto";
 import { getBaseUrl } from "@/lib/base-url";
+import type { GbpMetrics } from "./types";
 
 const GBP_PROVIDER_KEY = "gbp_oauth";
 const GBP_SCOPES = ["https://www.googleapis.com/auth/business.manage"];
@@ -236,6 +237,114 @@ const getValidAccessToken = async (siteId: number): Promise<string> => {
   return tokens.access_token;
 };
 
+// Business Profile Performance API — fetchMultiDailyMetricsTimeSeries
+// https://developers.google.com/my-business/reference/performance/rest/v1/locations/fetchMultiDailyMetricsTimeSeries
+// Scope: business.manage. Daily metric values are int64 strings; "value" is omitted when zero.
+
+const GBP_DAILY_METRICS = [
+  "BUSINESS_IMPRESSIONS_DESKTOP_SEARCH",
+  "BUSINESS_IMPRESSIONS_MOBILE_SEARCH",
+  "BUSINESS_IMPRESSIONS_DESKTOP_MAPS",
+  "BUSINESS_IMPRESSIONS_MOBILE_MAPS",
+  "CALL_CLICKS",
+  "WEBSITE_CLICKS",
+  "BUSINESS_DIRECTION_REQUESTS",
+  "BUSINESS_CONVERSATIONS",
+  "BUSINESS_BOOKINGS",
+] as const;
+
+type GbpDailyMetric = (typeof GBP_DAILY_METRICS)[number];
+
+const GBP_METRIC_FIELD: Record<GbpDailyMetric, keyof GbpMetrics> = {
+  BUSINESS_IMPRESSIONS_DESKTOP_SEARCH: "impressionsDesktopSearch",
+  BUSINESS_IMPRESSIONS_MOBILE_SEARCH: "impressionsMobileSearch",
+  BUSINESS_IMPRESSIONS_DESKTOP_MAPS: "impressionsDesktopMaps",
+  BUSINESS_IMPRESSIONS_MOBILE_MAPS: "impressionsMobileMaps",
+  CALL_CLICKS: "callClicks",
+  WEBSITE_CLICKS: "websiteClicks",
+  BUSINESS_DIRECTION_REQUESTS: "directionRequests",
+  BUSINESS_CONVERSATIONS: "conversations",
+  BUSINESS_BOOKINGS: "bookings",
+};
+
+const emptyGbpMetrics = (): GbpMetrics => ({
+  impressionsDesktopSearch: 0,
+  impressionsMobileSearch: 0,
+  impressionsDesktopMaps: 0,
+  impressionsMobileMaps: 0,
+  callClicks: 0,
+  websiteClicks: 0,
+  directionRequests: 0,
+  conversations: 0,
+  bookings: 0,
+});
+
+type GbpFetchResponse = {
+  multiDailyMetricTimeSeries?: Array<{
+    dailyMetricTimeSeries?: Array<{
+      dailyMetric: GbpDailyMetric;
+      timeSeries?: {
+        datedValues?: Array<{
+          date: { year: number; month: number; day: number };
+          value?: string;
+        }>;
+      };
+    }>;
+  }>;
+};
+
+/**
+ * Daily timeseries for a connected GBP location: one row per date in [startDate, endDate].
+ * Strips locations/ prefix if caller passed it. Dates are YYYY-MM-DD.
+ */
+const fetchDailyTimeseries = async (
+  siteId: number,
+  locationId: string,
+  startDate: string,
+  endDate: string,
+): Promise<Array<{ date: string; metrics: GbpMetrics }>> => {
+  const accessToken = await getValidAccessToken(siteId);
+  const id = locationId.startsWith("locations/") ? locationId.slice("locations/".length) : locationId;
+  const [sy, sm, sd] = startDate.split("-").map(Number);
+  const [ey, em, ed] = endDate.split("-").map(Number);
+
+  const params = new URLSearchParams();
+  for (const m of GBP_DAILY_METRICS) params.append("dailyMetrics", m);
+  params.append("dailyRange.start_date.year", String(sy));
+  params.append("dailyRange.start_date.month", String(sm));
+  params.append("dailyRange.start_date.day", String(sd));
+  params.append("dailyRange.end_date.year", String(ey));
+  params.append("dailyRange.end_date.month", String(em));
+  params.append("dailyRange.end_date.day", String(ed));
+
+  const url = `https://businessprofileperformance.googleapis.com/v1/locations/${id}:fetchMultiDailyMetricsTimeSeries?${params}`;
+  const res = await fetch(url, { headers: { Authorization: `Bearer ${accessToken}` } });
+  if (!res.ok) {
+    const body = await res.text();
+    throw new Error(`GBP Performance API ${res.status}: ${body.slice(0, 500)}`);
+  }
+
+  const data = (await res.json()) as GbpFetchResponse;
+
+  const byDate = new Map<string, GbpMetrics>();
+  for (const outer of data.multiDailyMetricTimeSeries ?? []) {
+    for (const inner of outer.dailyMetricTimeSeries ?? []) {
+      const field = GBP_METRIC_FIELD[inner.dailyMetric];
+      if (!field) continue;
+      for (const dv of inner.timeSeries?.datedValues ?? []) {
+        const dateStr = `${dv.date.year}-${String(dv.date.month).padStart(2, "0")}-${String(dv.date.day).padStart(2, "0")}`;
+        const row = byDate.get(dateStr) ?? emptyGbpMetrics();
+        row[field] = Number(dv.value ?? "0");
+        byDate.set(dateStr, row);
+      }
+    }
+  }
+
+  return [...byDate.entries()]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([date, metrics]) => ({ date, metrics }));
+};
+
 export {
   GBP_PROVIDER_KEY,
   buildAuthState,
@@ -250,6 +359,7 @@ export {
   updateGbpLocationOnSite,
   clearGbpConnectionOnSite,
   getValidAccessToken,
+  fetchDailyTimeseries,
 };
 
 export type { EnumeratedLocation };

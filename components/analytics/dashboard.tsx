@@ -13,11 +13,19 @@ import { TopTable } from "./top-table";
 import { SessionsChart } from "./sessions-chart";
 import { Ga4TopTable } from "./ga4-top-table";
 import { LeadsChart } from "./leads-chart";
+import { GbpImpressionsChart, GbpActionsChart } from "./gbp-chart";
+import { HeatmapTrendChart } from "./heatmap-display";
+import { HeatmapMap } from "./heatmap-map";
 import type {
   Ga4AiReferrals,
   Ga4Summary,
   Ga4TimeseriesPoint,
   Ga4TopRow,
+  GbpSummary,
+  GbpTimeseriesPoint,
+  HeatmapHistoryPoint,
+  HeatmapRunDetail,
+  KeywordWithLatest,
   LeadsByFormRow,
   LeadsSummary,
   LeadsTimeseriesPoint,
@@ -50,6 +58,8 @@ const TABS = [
   { label: "Activity", id: "activity" },
   { label: "Search", id: "search" },
   { label: "Traffic", id: "traffic" },
+  { label: "Profile", id: "profile" },
+  { label: "Local Rank", id: "local-rank" },
   { label: "Leads", id: "leads" },
   { label: "AI Citations", id: "ai-citations" },
 ] as const;
@@ -91,6 +101,10 @@ export function AnalyticsDashboard({ owner, repo }: Props) {
   const [tab, setTab] = useState<(typeof TABS)[number]["id"]>("overview");
   const [granularity, setGranularity] = useState<"day" | "week">("day");
   const [mode, setMode] = useState<"normalized" | "raw">("normalized");
+  const [selectedKeywordId, setSelectedKeywordId] = useState<number | null>(null);
+  const [compareMode, setCompareMode] = useState(false);
+  const [leftRunDate, setLeftRunDate] = useState<string | null>(null);
+  const [rightRunDate, setRightRunDate] = useState<string | null>(null);
 
   const base = `/api/${owner}/${repo}/analytics`;
   const { data: summaryData } = useSWR<{ summary: Summary | null }>(`${base}/summary?days=${days}`, fetcher);
@@ -126,6 +140,39 @@ export function AnalyticsDashboard({ owner, repo }: Props) {
   }>(tab === "ai-citations" ? `${base}/llm-mentions?days=${days}` : null, fetcher);
   const { data: activityData } = useSWR<{ entries: ActivityRow[] }>(
     tab === "activity" ? `${base}/activity?days=${days}` : null,
+    fetcher,
+  );
+  const { data: gbpData } = useSWR<{
+    connected: boolean;
+    locationName: string | null;
+    summary: GbpSummary | null;
+    points: GbpTimeseriesPoint[];
+  }>(tab === "profile" ? `${base}/gbp-profile?days=${days}` : null, fetcher);
+  const { data: keywordsData } = useSWR<{ keywords: KeywordWithLatest[] }>(
+    tab === "local-rank" ? `${base}/keywords` : null,
+    fetcher,
+  );
+  const activeKeywordId =
+    selectedKeywordId ?? keywordsData?.keywords.find((k) => k.enabled)?.id ?? null;
+  const { data: heatmapData } = useSWR<{
+    latest: HeatmapRunDetail | null;
+    history: HeatmapHistoryPoint[];
+  }>(
+    tab === "local-rank" && activeKeywordId
+      ? `${base}/heatmap?keywordId=${activeKeywordId}&weeks=12`
+      : null,
+    fetcher,
+  );
+  const { data: leftHeatmap } = useSWR<{ latest: HeatmapRunDetail | null }>(
+    compareMode && activeKeywordId && leftRunDate
+      ? `${base}/heatmap?keywordId=${activeKeywordId}&runDate=${leftRunDate}`
+      : null,
+    fetcher,
+  );
+  const { data: rightHeatmap } = useSWR<{ latest: HeatmapRunDetail | null }>(
+    compareMode && activeKeywordId && rightRunDate
+      ? `${base}/heatmap?keywordId=${activeKeywordId}&runDate=${rightRunDate}`
+      : null,
     fetcher,
   );
 
@@ -656,6 +703,303 @@ export function AnalyticsDashboard({ owner, repo }: Props) {
             <div className="h-32 flex items-center justify-center text-muted-foreground text-sm">
               {trafficData === undefined ? "Loading…" : "No GA4 data yet. Configure a property ID in Settings."}
             </div>
+          )}
+        </>
+      )}
+
+      {tab === "profile" && (
+        <>
+          {!gbpData ? (
+            <div className="h-32 flex items-center justify-center text-muted-foreground text-sm">Loading…</div>
+          ) : !gbpData.connected ? (
+            <div className="h-32 flex flex-col items-center justify-center text-center text-muted-foreground text-sm px-4 gap-2">
+              <p>Google Business Profile is not connected for this site.</p>
+              <a className="underline" href={`/${owner}/${repo}/analytics/settings`}>
+                Connect it in Settings
+              </a>
+            </div>
+          ) : !gbpData.summary || gbpData.summary.current.totalImpressions + gbpData.summary.current.totalActions === 0 ? (
+            <div className="h-32 flex items-center justify-center text-center text-muted-foreground text-sm px-4">
+              No GBP performance data in this window yet. Initial sync backfills 90 days; daily refreshes run at 04:00 UTC.
+              GBP data lags ~3 days.
+            </div>
+          ) : (
+            <>
+              {gbpData.locationName && (
+                <p className="text-xs text-muted-foreground">
+                  Location: <span className="font-medium">{gbpData.locationName}</span>
+                </p>
+              )}
+
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <KpiCard
+                  label="Search impressions"
+                  value={formatNumber(gbpData.summary.current.searchImpressions)}
+                  delta={gbpData.summary.delta.searchImpressions}
+                  priorValue={formatNumber(gbpData.summary.previous.searchImpressions)}
+                />
+                <KpiCard
+                  label="Maps impressions"
+                  value={formatNumber(gbpData.summary.current.mapsImpressions)}
+                  delta={gbpData.summary.delta.mapsImpressions}
+                  priorValue={formatNumber(gbpData.summary.previous.mapsImpressions)}
+                />
+                <KpiCard
+                  label="Calls"
+                  value={formatNumber(gbpData.summary.current.callClicks)}
+                  delta={gbpData.summary.delta.callClicks}
+                  priorValue={formatNumber(gbpData.summary.previous.callClicks)}
+                />
+                <KpiCard
+                  label="Website clicks"
+                  value={formatNumber(gbpData.summary.current.websiteClicks)}
+                  delta={gbpData.summary.delta.websiteClicks}
+                  priorValue={formatNumber(gbpData.summary.previous.websiteClicks)}
+                />
+                <KpiCard
+                  label="Direction requests"
+                  value={formatNumber(gbpData.summary.current.directionRequests)}
+                  delta={gbpData.summary.delta.directionRequests}
+                  priorValue={formatNumber(gbpData.summary.previous.directionRequests)}
+                />
+                {(gbpData.summary.current.conversations > 0 || gbpData.summary.previous.conversations > 0) && (
+                  <KpiCard
+                    label="Messages"
+                    value={formatNumber(gbpData.summary.current.conversations)}
+                    delta={gbpData.summary.delta.conversations}
+                    priorValue={formatNumber(gbpData.summary.previous.conversations)}
+                  />
+                )}
+                {(gbpData.summary.current.bookings > 0 || gbpData.summary.previous.bookings > 0) && (
+                  <KpiCard
+                    label="Bookings"
+                    value={formatNumber(gbpData.summary.current.bookings)}
+                    delta={gbpData.summary.delta.bookings}
+                    priorValue={formatNumber(gbpData.summary.previous.bookings)}
+                  />
+                )}
+                <KpiCard
+                  label="Total actions"
+                  value={formatNumber(gbpData.summary.current.totalActions)}
+                  delta={gbpData.summary.delta.totalActions}
+                  priorValue={formatNumber(gbpData.summary.previous.totalActions)}
+                />
+              </div>
+
+              <Card>
+                <CardHeader className="flex-row items-center justify-between space-y-0 pb-2 gap-3 flex-wrap">
+                  <CardTitle>Impressions — Search vs Maps</CardTitle>
+                  <Pills
+                    options={[
+                      { label: "Daily", value: "day" },
+                      { label: "Weekly", value: "week" },
+                    ] as const}
+                    value={granularity}
+                    onChange={setGranularity}
+                  />
+                </CardHeader>
+                <CardContent>
+                  <GbpImpressionsChart points={gbpData.points} granularity={granularity} />
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader className="pb-2">
+                  <CardTitle>Customer actions</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <GbpActionsChart points={gbpData.points} granularity={granularity} />
+                  <p className="text-xs text-muted-foreground mt-2">
+                    GBP performance data lags ~3 days. Messages and Bookings appear only when the location has those features enabled.
+                  </p>
+                </CardContent>
+              </Card>
+            </>
+          )}
+        </>
+      )}
+
+      {tab === "local-rank" && (
+        <>
+          {!keywordsData ? (
+            <div className="h-32 flex items-center justify-center text-muted-foreground text-sm">Loading…</div>
+          ) : keywordsData.keywords.length === 0 ? (
+            <div className="h-32 flex flex-col items-center justify-center text-center text-muted-foreground text-sm px-4 gap-2">
+              <p>No target keywords configured for this site yet.</p>
+              <a className="underline" href={`/${owner}/${repo}/analytics/settings`}>
+                Add keywords in Settings
+              </a>
+            </div>
+          ) : (
+            <>
+              {/* Keyword picker */}
+              <Card>
+                <CardHeader className="pb-2">
+                  <CardTitle>Target keyword</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="flex flex-wrap gap-2">
+                    {keywordsData.keywords
+                      .filter((k) => k.enabled)
+                      .map((k) => (
+                        <button
+                          key={k.id}
+                          onClick={() => setSelectedKeywordId(k.id)}
+                          className={cn(
+                            "px-3 py-1.5 text-xs rounded-md border transition",
+                            activeKeywordId === k.id
+                              ? "bg-primary text-primary-foreground border-primary"
+                              : "bg-background text-foreground border-border hover:border-foreground/50",
+                          )}
+                        >
+                          {k.keyword}
+                          {k.latestRun?.summary && "averageRank" in k.latestRun.summary && k.latestRun.summary.averageRank != null && (
+                            <span className="ml-2 text-[10px] opacity-70">
+                              avg {Number(k.latestRun.summary.averageRank).toFixed(1)}
+                            </span>
+                          )}
+                        </button>
+                      ))}
+                  </div>
+                </CardContent>
+              </Card>
+
+              {!activeKeywordId || !heatmapData ? (
+                <div className="h-32 flex items-center justify-center text-muted-foreground text-sm">
+                  {activeKeywordId ? "Loading heatmap…" : "Select a keyword above"}
+                </div>
+              ) : !heatmapData.latest ? (
+                <div className="h-32 flex items-center justify-center text-center text-muted-foreground text-sm px-4">
+                  No heat-map runs yet for this keyword. The weekly cron runs Mondays at 02:00 UTC.
+                </div>
+              ) : heatmapData.latest.errorReason ? (
+                <Card>
+                  <CardContent className="py-6">
+                    <p className="text-sm text-red-600">
+                      Latest run failed: <span className="font-medium">{heatmapData.latest.errorReason}</span>
+                    </p>
+                    <p className="text-xs text-muted-foreground mt-2">Run date: {heatmapData.latest.runDate}</p>
+                  </CardContent>
+                </Card>
+              ) : (
+                <>
+                  {/* KPIs */}
+                  {"averageRank" in heatmapData.latest.summary && (
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                      <KpiCard
+                        label="Avg rank"
+                        value={
+                          heatmapData.latest.summary.averageRank != null
+                            ? Number(heatmapData.latest.summary.averageRank).toFixed(1)
+                            : "—"
+                        }
+                        delta={null}
+                        sublabel={`${heatmapData.latest.summary.foundCount}/${heatmapData.latest.summary.totalPoints} cells found`}
+                      />
+                      <KpiCard
+                        label="Top 3 share"
+                        value={`${Number(heatmapData.latest.summary.top3Percent).toFixed(0)}%`}
+                        delta={null}
+                      />
+                      <KpiCard
+                        label="Visibility"
+                        value={`${Number(heatmapData.latest.summary.foundPercent).toFixed(0)}%`}
+                        delta={null}
+                      />
+                      <KpiCard
+                        label="Run date"
+                        value={heatmapData.latest.runDate}
+                        delta={null}
+                      />
+                    </div>
+                  )}
+
+                  {/* Heatmap on Google Maps */}
+                  <Card>
+                    <CardHeader className="flex-row items-start justify-between space-y-0 gap-3 pb-2 flex-wrap">
+                      <div>
+                        <CardTitle>Heat map — local rank by location</CardTitle>
+                        <p className="text-xs text-muted-foreground mt-1">
+                          Each pin marks a geographic point in the search grid. Color shows local rank from that location.
+                        </p>
+                      </div>
+                      {heatmapData.history.length >= 2 && (
+                        <Pills
+                          options={[
+                            { label: "Single", value: "single" },
+                            { label: "Compare runs", value: "compare" },
+                          ] as const}
+                          value={compareMode ? "compare" : "single"}
+                          onChange={(v) => {
+                            const next = v === "compare";
+                            setCompareMode(next);
+                            if (next) {
+                              setLeftRunDate(heatmapData.history[0]?.runDate ?? null);
+                              setRightRunDate(
+                                heatmapData.history[heatmapData.history.length - 1]?.runDate ?? null,
+                              );
+                            }
+                          }}
+                        />
+                      )}
+                    </CardHeader>
+                    <CardContent>
+                      {!compareMode ? (
+                        <HeatmapMap cells={heatmapData.latest.grid} />
+                      ) : (
+                        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                          {([
+                            { side: "left", date: leftRunDate, setDate: setLeftRunDate, data: leftHeatmap },
+                            { side: "right", date: rightRunDate, setDate: setRightRunDate, data: rightHeatmap },
+                          ] as const).map(({ side, date, setDate, data }) => (
+                            <div key={side} className="space-y-2">
+                              <div className="flex items-center gap-2">
+                                <label className="text-xs text-muted-foreground">Run date:</label>
+                                <select
+                                  className="text-xs rounded border border-border bg-background px-2 py-1"
+                                  value={date ?? ""}
+                                  onChange={(e) => setDate(e.target.value || null)}
+                                >
+                                  {heatmapData.history.map((h) => (
+                                    <option key={h.runDate} value={h.runDate}>
+                                      {h.runDate} · avg {h.averageRank?.toFixed(1) ?? "—"} · {Math.round(h.foundPercent)}% visible
+                                    </option>
+                                  ))}
+                                </select>
+                              </div>
+                              {!data ? (
+                                <div className="h-[500px] rounded-md border bg-muted/30 flex items-center justify-center text-sm text-muted-foreground">
+                                  Loading…
+                                </div>
+                              ) : !data.latest ? (
+                                <div className="h-[500px] rounded-md border bg-muted/30 flex items-center justify-center text-sm text-muted-foreground">
+                                  No run on {date}
+                                </div>
+                              ) : (
+                                <HeatmapMap cells={data.latest.grid} />
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </CardContent>
+                  </Card>
+
+                  {/* Trend */}
+                  <Card>
+                    <CardHeader className="pb-2">
+                      <CardTitle>Average rank — last 12 weeks</CardTitle>
+                      <p className="text-xs text-muted-foreground mt-1">
+                        Y-axis is inverted — higher on the chart = better ranking. Green dashed line marks the top-3 threshold.
+                      </p>
+                    </CardHeader>
+                    <CardContent>
+                      <HeatmapTrendChart history={heatmapData.history} />
+                    </CardContent>
+                  </Card>
+                </>
+              )}
+            </>
           )}
         </>
       )}

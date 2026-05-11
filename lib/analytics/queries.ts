@@ -2,8 +2,14 @@ import "server-only";
 
 import { and, desc, eq, gte, lte, sql } from "drizzle-orm";
 import { db } from "@/db";
-import { analyticsDailyTable, analyticsDimensionTable } from "@/db/schema";
+import {
+  analyticsDailyTable,
+  analyticsDimensionTable,
+  analyticsHeatmapRunTable,
+  analyticsSiteKeywordTable,
+} from "@/db/schema";
 import type { AnalyticsProvider } from "./types";
+import type { HeatMapCell, HeatMapSummary } from "./local-rank";
 import { matchAiSurface } from "./ai-sources";
 
 /** YYYY-MM-DD helpers — we store date as TEXT so string compare is correct. */
@@ -782,6 +788,338 @@ export const getLeadsTimeseries = async (siteId: number, days: number): Promise<
     out.push({ date: key, forms: byDate.get(key) ?? 0 });
   }
   return out;
+};
+
+/* ─── Google Business Profile (Performance API) ───────────────────────── */
+
+export type GbpSummaryMetrics = {
+  searchImpressions: number;
+  mapsImpressions: number;
+  totalImpressions: number;
+  callClicks: number;
+  websiteClicks: number;
+  directionRequests: number;
+  conversations: number;
+  bookings: number;
+  totalActions: number;
+};
+
+export type GbpSummary = {
+  window: { start: string; end: string };
+  prior: { start: string; end: string };
+  current: GbpSummaryMetrics;
+  previous: GbpSummaryMetrics;
+  delta: Record<keyof GbpSummaryMetrics, number>;
+};
+
+const gbpAggregate = async (siteId: number, start: string, end: string): Promise<GbpSummaryMetrics> => {
+  const m = analyticsDailyTable.metrics;
+  const rows = await db
+    .select({
+      impressionsDesktopSearch: sql<number>`coalesce(sum((${m}->>'impressionsDesktopSearch')::int), 0)`,
+      impressionsMobileSearch: sql<number>`coalesce(sum((${m}->>'impressionsMobileSearch')::int), 0)`,
+      impressionsDesktopMaps: sql<number>`coalesce(sum((${m}->>'impressionsDesktopMaps')::int), 0)`,
+      impressionsMobileMaps: sql<number>`coalesce(sum((${m}->>'impressionsMobileMaps')::int), 0)`,
+      callClicks: sql<number>`coalesce(sum((${m}->>'callClicks')::int), 0)`,
+      websiteClicks: sql<number>`coalesce(sum((${m}->>'websiteClicks')::int), 0)`,
+      directionRequests: sql<number>`coalesce(sum((${m}->>'directionRequests')::int), 0)`,
+      conversations: sql<number>`coalesce(sum((${m}->>'conversations')::int), 0)`,
+      bookings: sql<number>`coalesce(sum((${m}->>'bookings')::int), 0)`,
+    })
+    .from(analyticsDailyTable)
+    .where(
+      and(
+        eq(analyticsDailyTable.siteId, siteId),
+        eq(analyticsDailyTable.provider, "gbp"),
+        gte(analyticsDailyTable.date, start),
+        lte(analyticsDailyTable.date, end),
+      ),
+    );
+  const r = rows[0];
+  const searchImpressions = Number(r?.impressionsDesktopSearch ?? 0) + Number(r?.impressionsMobileSearch ?? 0);
+  const mapsImpressions = Number(r?.impressionsDesktopMaps ?? 0) + Number(r?.impressionsMobileMaps ?? 0);
+  const callClicks = Number(r?.callClicks ?? 0);
+  const websiteClicks = Number(r?.websiteClicks ?? 0);
+  const directionRequests = Number(r?.directionRequests ?? 0);
+  const conversations = Number(r?.conversations ?? 0);
+  const bookings = Number(r?.bookings ?? 0);
+  return {
+    searchImpressions,
+    mapsImpressions,
+    totalImpressions: searchImpressions + mapsImpressions,
+    callClicks,
+    websiteClicks,
+    directionRequests,
+    conversations,
+    bookings,
+    totalActions: callClicks + websiteClicks + directionRequests + conversations + bookings,
+  };
+};
+
+export const getGbpSummary = async (siteId: number, days: number): Promise<GbpSummary> => {
+  const w = getWindow(days);
+  const [current, previous] = await Promise.all([
+    gbpAggregate(siteId, w.start, w.end),
+    gbpAggregate(siteId, w.priorStart, w.priorEnd),
+  ]);
+  const delta: Record<keyof GbpSummaryMetrics, number> = {
+    searchImpressions: pct(current.searchImpressions, previous.searchImpressions),
+    mapsImpressions: pct(current.mapsImpressions, previous.mapsImpressions),
+    totalImpressions: pct(current.totalImpressions, previous.totalImpressions),
+    callClicks: pct(current.callClicks, previous.callClicks),
+    websiteClicks: pct(current.websiteClicks, previous.websiteClicks),
+    directionRequests: pct(current.directionRequests, previous.directionRequests),
+    conversations: pct(current.conversations, previous.conversations),
+    bookings: pct(current.bookings, previous.bookings),
+    totalActions: pct(current.totalActions, previous.totalActions),
+  };
+  return {
+    window: { start: w.start, end: w.end },
+    prior: { start: w.priorStart, end: w.priorEnd },
+    current,
+    previous,
+    delta,
+  };
+};
+
+export type GbpTimeseriesPoint = {
+  date: string;
+  searchImpressions: number;
+  mapsImpressions: number;
+  callClicks: number;
+  websiteClicks: number;
+  directionRequests: number;
+  conversations: number;
+  bookings: number;
+};
+
+const emptyGbp = (date: string): GbpTimeseriesPoint => ({
+  date,
+  searchImpressions: 0,
+  mapsImpressions: 0,
+  callClicks: 0,
+  websiteClicks: 0,
+  directionRequests: 0,
+  conversations: 0,
+  bookings: 0,
+});
+
+export const getGbpTimeseries = async (siteId: number, days: number): Promise<GbpTimeseriesPoint[]> => {
+  const w = getWindow(days);
+  const m = analyticsDailyTable.metrics;
+  const rows = await db
+    .select({
+      date: analyticsDailyTable.date,
+      impressionsDesktopSearch: sql<number>`coalesce((${m}->>'impressionsDesktopSearch')::int, 0)`,
+      impressionsMobileSearch: sql<number>`coalesce((${m}->>'impressionsMobileSearch')::int, 0)`,
+      impressionsDesktopMaps: sql<number>`coalesce((${m}->>'impressionsDesktopMaps')::int, 0)`,
+      impressionsMobileMaps: sql<number>`coalesce((${m}->>'impressionsMobileMaps')::int, 0)`,
+      callClicks: sql<number>`coalesce((${m}->>'callClicks')::int, 0)`,
+      websiteClicks: sql<number>`coalesce((${m}->>'websiteClicks')::int, 0)`,
+      directionRequests: sql<number>`coalesce((${m}->>'directionRequests')::int, 0)`,
+      conversations: sql<number>`coalesce((${m}->>'conversations')::int, 0)`,
+      bookings: sql<number>`coalesce((${m}->>'bookings')::int, 0)`,
+    })
+    .from(analyticsDailyTable)
+    .where(
+      and(
+        eq(analyticsDailyTable.siteId, siteId),
+        eq(analyticsDailyTable.provider, "gbp"),
+        gte(analyticsDailyTable.date, w.start),
+        lte(analyticsDailyTable.date, w.end),
+      ),
+    )
+    .orderBy(analyticsDailyTable.date);
+
+  const byDate = new Map<string, GbpTimeseriesPoint>();
+  for (const r of rows) {
+    byDate.set(r.date, {
+      date: r.date,
+      searchImpressions: Number(r.impressionsDesktopSearch ?? 0) + Number(r.impressionsMobileSearch ?? 0),
+      mapsImpressions: Number(r.impressionsDesktopMaps ?? 0) + Number(r.impressionsMobileMaps ?? 0),
+      callClicks: Number(r.callClicks ?? 0),
+      websiteClicks: Number(r.websiteClicks ?? 0),
+      directionRequests: Number(r.directionRequests ?? 0),
+      conversations: Number(r.conversations ?? 0),
+      bookings: Number(r.bookings ?? 0),
+    });
+  }
+  const out: GbpTimeseriesPoint[] = [];
+  for (let d = new Date(w.start); fmt(d) <= w.end; d = addDays(d, 1)) {
+    const key = fmt(d);
+    out.push(byDate.get(key) ?? emptyGbp(key));
+  }
+  return out;
+};
+
+/* ─── Local Rank Heat Maps (RapidAPI local-rank-tracker) ─────────────── */
+
+export type KeywordWithLatest = {
+  id: number;
+  keyword: string;
+  enabled: boolean;
+  placeId: string | null;
+  lat: string | null;
+  lng: string | null;
+  gridSize: number;
+  radius: number;
+  radiusUnits: string;
+  shape: string;
+  zoom: number;
+  latestRun: {
+    runDate: string;
+    summary: HeatMapSummary | Record<string, never>;
+    errorReason: string | null;
+  } | null;
+};
+
+export const getKeywords = async (siteId: number): Promise<KeywordWithLatest[]> => {
+  const keywords = await db
+    .select()
+    .from(analyticsSiteKeywordTable)
+    .where(eq(analyticsSiteKeywordTable.siteId, siteId))
+    .orderBy(analyticsSiteKeywordTable.keyword);
+
+  if (keywords.length === 0) return [];
+
+  // Latest run per keyword via DISTINCT ON.
+  const latest = await db.execute(sql`
+    SELECT DISTINCT ON (keyword_id)
+      keyword_id, run_date, summary, error_reason
+    FROM analytics_heatmap_run
+    WHERE site_id = ${siteId}
+    ORDER BY keyword_id, run_date DESC
+  `);
+
+  type LatestRow = { keyword_id: number; run_date: string; summary: unknown; error_reason: string | null };
+  const byKw = new Map<number, LatestRow>();
+  for (const r of latest as unknown as LatestRow[]) {
+    byKw.set(r.keyword_id, r);
+  }
+
+  return keywords.map((k) => {
+    const lr = byKw.get(k.id);
+    return {
+      id: k.id,
+      keyword: k.keyword,
+      enabled: k.enabled,
+      placeId: k.placeId,
+      lat: k.lat,
+      lng: k.lng,
+      gridSize: k.gridSize,
+      radius: k.radius,
+      radiusUnits: k.radiusUnits,
+      shape: k.shape,
+      zoom: k.zoom,
+      latestRun: lr
+        ? {
+            runDate: lr.run_date,
+            summary: lr.summary as HeatMapSummary | Record<string, never>,
+            errorReason: lr.error_reason,
+          }
+        : null,
+    };
+  });
+};
+
+export type HeatmapRunDetail = {
+  id: number;
+  keywordId: number;
+  runDate: string;
+  summary: HeatMapSummary | Record<string, never>;
+  grid: HeatMapCell[];
+  errorReason: string | null;
+  fetchedAt: string;
+};
+
+const heatmapRunRowToDetail = (
+  r: typeof analyticsHeatmapRunTable.$inferSelect,
+): HeatmapRunDetail => ({
+  id: r.id,
+  keywordId: r.keywordId,
+  runDate: r.runDate,
+  summary: r.summary as HeatMapSummary | Record<string, never>,
+  grid: r.grid as HeatMapCell[],
+  errorReason: r.errorReason,
+  fetchedAt: r.fetchedAt.toISOString(),
+});
+
+export const getLatestHeatMap = async (
+  siteId: number,
+  keywordId: number,
+): Promise<HeatmapRunDetail | null> => {
+  const rows = await db
+    .select()
+    .from(analyticsHeatmapRunTable)
+    .where(
+      and(
+        eq(analyticsHeatmapRunTable.siteId, siteId),
+        eq(analyticsHeatmapRunTable.keywordId, keywordId),
+      ),
+    )
+    .orderBy(desc(analyticsHeatmapRunTable.runDate))
+    .limit(1);
+
+  return rows[0] ? heatmapRunRowToDetail(rows[0]) : null;
+};
+
+export const getHeatMapForRun = async (
+  siteId: number,
+  keywordId: number,
+  runDate: string,
+): Promise<HeatmapRunDetail | null> => {
+  const rows = await db
+    .select()
+    .from(analyticsHeatmapRunTable)
+    .where(
+      and(
+        eq(analyticsHeatmapRunTable.siteId, siteId),
+        eq(analyticsHeatmapRunTable.keywordId, keywordId),
+        eq(analyticsHeatmapRunTable.runDate, runDate),
+      ),
+    )
+    .limit(1);
+
+  return rows[0] ? heatmapRunRowToDetail(rows[0]) : null;
+};
+
+export type HeatmapHistoryPoint = {
+  runDate: string;
+  averageRank: number | null;
+  foundPercent: number;
+  top3Percent: number;
+};
+
+export const getHeatMapHistory = async (
+  siteId: number,
+  keywordId: number,
+  weeks: number = 12,
+): Promise<HeatmapHistoryPoint[]> => {
+  const rows = await db
+    .select({
+      runDate: analyticsHeatmapRunTable.runDate,
+      averageRank: sql<number | null>`(${analyticsHeatmapRunTable.summary}->>'averageRank')::numeric`,
+      foundPercent: sql<number>`coalesce((${analyticsHeatmapRunTable.summary}->>'foundPercent')::numeric, 0)`,
+      top3Percent: sql<number>`coalesce((${analyticsHeatmapRunTable.summary}->>'top3Percent')::numeric, 0)`,
+    })
+    .from(analyticsHeatmapRunTable)
+    .where(
+      and(
+        eq(analyticsHeatmapRunTable.siteId, siteId),
+        eq(analyticsHeatmapRunTable.keywordId, keywordId),
+      ),
+    )
+    .orderBy(desc(analyticsHeatmapRunTable.runDate))
+    .limit(weeks);
+
+  return rows
+    .map((r) => ({
+      runDate: r.runDate,
+      averageRank: r.averageRank != null ? Number(r.averageRank) : null,
+      foundPercent: Number(r.foundPercent),
+      top3Percent: Number(r.top3Percent),
+    }))
+    .reverse();
 };
 
 export const getLeadsByForm = async (siteId: number, days: number): Promise<LeadsByFormRow[]> => {

@@ -113,6 +113,13 @@
       "when": 1777561457735,
       "tag": "0015_many_paibok",
       "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1777579846889,
+      "tag": "0016_oval_angel",
+      "breakpoints": true
     }
   ]
 }

@@ -56,7 +56,7 @@ export const buildCmsUrl = (
   const section = typeof metadata.section === "string" ? metadata.section : null;
 
   if (kind === "blog_published" && slug) {
-    return `${base}/collection/posts/edit/${encodeURIComponent(slug)}.md`;
+    return `${base}/collection/posts/edit/${encodeURIComponent(`src/blog/${slug}.md`)}`;
   }
   if (kind === "content_updated") {
     if (section === "blog") return `${base}/collection/posts`;

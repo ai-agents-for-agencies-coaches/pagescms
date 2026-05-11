@@ -1,6 +1,6 @@
 import "server-only";
 
-import { eq, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { db } from "@/db";
 import {
   analyticsDailyTable,
@@ -12,6 +12,7 @@ import * as bing from "./bing";
 import * as ga4 from "./ga4";
 import * as netlifyForms from "./netlify-forms";
 import * as llmMentions from "./llm-mentions";
+import * as gbp from "./gbp";
 import * as activity from "./activity";
 import type { AnalyticsProvider, AnalyticsSiteRow, LlmPlatform } from "./types";
 
@@ -26,6 +27,7 @@ export type SyncResult = {
   ga4: ProviderResult | null;
   netlifyForms: ProviderResult | null;
   llmMentions: ProviderResult | null;
+  gbp: ProviderResult | null;
   activity: ProviderResult | null;
 };
 
@@ -133,6 +135,7 @@ export const syncSite = async (
     bing: null,
     ga4: null,
     netlifyForms: null,
+    gbp: null,
   };
 
   if (site.gscProperty) {
@@ -308,6 +311,35 @@ export const syncSite = async (
           reason: error instanceof Error ? error.message : "unknown DataForSEO error",
         };
       }
+    }
+  }
+
+  if (site.gbpLocationId) {
+    try {
+      // First-run detection: if there are no analytics_daily rows for provider='gbp' yet,
+      // backfill 90 days. Otherwise use the standard incremental window.
+      const existing = await db
+        .select({ n: sql<number>`count(*)::int` })
+        .from(analyticsDailyTable)
+        .where(
+          and(
+            eq(analyticsDailyTable.siteId, site.id),
+            eq(analyticsDailyTable.provider, "gbp"),
+          ),
+        );
+      const hasPriorRows = Number(existing[0]?.n ?? 0) > 0;
+      const gbpStartDate = hasPriorRows
+        ? startDate
+        : formatDate(addDays(new Date(endDate), -90));
+
+      const daily = await gbp.fetchDailyTimeseries(site.id, site.gbpLocationId, gbpStartDate, endDate);
+      await upsertDailyRows(site.id, "gbp", daily);
+      result.gbp = { ok: true, dates: daily.length };
+    } catch (error) {
+      result.gbp = {
+        ok: false,
+        reason: error instanceof Error ? error.message : "unknown GBP error",
+      };
     }
   }
 
