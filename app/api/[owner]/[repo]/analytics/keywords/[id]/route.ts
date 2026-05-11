@@ -9,6 +9,7 @@ import { toErrorResponse } from "@/lib/api-error";
 
 type RouteParams = { owner: string; repo: string; id: string };
 type PatchBody = {
+  keyword?: string;
   enabled?: boolean;
   placeId?: string | null;
   lat?: string | null;
@@ -39,6 +40,13 @@ export async function PATCH(
 
     const body = (await request.json()) as PatchBody;
     const update: Partial<typeof analyticsSiteKeywordTable.$inferInsert> = { updatedAt: new Date() };
+    if (typeof body.keyword === "string") {
+      const trimmed = body.keyword.trim();
+      if (!trimmed || trimmed.length > 200) {
+        return NextResponse.json({ status: "error", message: "keyword must be 1–200 chars" }, { status: 400 });
+      }
+      update.keyword = trimmed;
+    }
     if (typeof body.enabled === "boolean") update.enabled = body.enabled;
     if (body.placeId !== undefined) update.placeId = body.placeId;
     if (body.lat !== undefined) update.lat = body.lat;
