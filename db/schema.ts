@@ -315,6 +315,21 @@ const analyticsHeatmapRunTable = pgTable("analytics_heatmap_run", {
   idx_analytics_heatmap_run_siteId_date: index("idx_analytics_heatmap_run_siteId_date").on(table.siteId, table.runDate),
 }));
 
+const indexingPingTable = pgTable("indexing_ping", {
+  id: serial("id").primaryKey(),
+  siteId: integer("site_id").notNull().references(() => analyticsSiteTable.id, { onDelete: "cascade" }),
+  netlifyDeployId: text("netlify_deploy_id"),
+  provider: text("provider").notNull(),
+  sitemapUrl: text("sitemap_url").notNull(),
+  status: text("status").notNull(),
+  errorMessage: text("error_message"),
+  durationMs: integer("duration_ms"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, table => ({
+  idx_indexing_ping_site_created: index("idx_indexing_ping_site_created").on(table.siteId, table.createdAt),
+  idx_indexing_ping_deploy: index("idx_indexing_ping_deploy").on(table.netlifyDeployId),
+}));
+
 export {
   userTable,
   sessionTable,
@@ -333,5 +348,6 @@ export {
   analyticsDimensionTable,
   analyticsActivityTable,
   analyticsSiteKeywordTable,
-  analyticsHeatmapRunTable
+  analyticsHeatmapRunTable,
+  indexingPingTable
 };
