@@ -88,7 +88,7 @@ const createCollaboratorInviteMagicLink = async ({
   const token = generateMagicLinkToken();
   const redirectPath = `/${owner}/${repo}`;
   const expiresAt = new Date(
-    Date.now() + ((Number(process.env.COLLABORATOR_INVITE_LINK_EXPIRES_IN) || 86400) * 1000),
+    Date.now() + ((Number(process.env.COLLABORATOR_INVITE_LINK_EXPIRES_IN) || 604800) * 1000),
   );
 
   await db.insert(verificationTable).values({

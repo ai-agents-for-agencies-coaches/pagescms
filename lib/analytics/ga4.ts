@@ -5,6 +5,44 @@ import type { Ga4Metrics } from "./types";
 
 const GA4_SCOPES = ["https://www.googleapis.com/auth/analytics.readonly"];
 
+/**
+ * Datacenter and known-bot city exclusions for GA4 reports.
+ *
+ * GA4's built-in bot filter does not catch traffic from major cloud datacenters
+ * (AWS, GCP, Azure regions) which routinely scrape sites with valid-looking
+ * user agents. The Terzo Roofing 60-day audit (2026-05-08) found ~50% of
+ * sessions came from these geos with 0% engagement, which makes per-client
+ * reporting unusable until they're excluded. Filter applied dashboard-wide
+ * via dimensionFilter on every report.
+ */
+export const BOT_CITY_EXCLUSIONS = [
+  "Singapore",
+  "Boardman",        // AWS Oregon
+  "Council Bluffs",  // Google datacenter, Iowa
+  "Lebanon",         // Akamai
+  "Cheyenne",        // datacenter, Wyoming
+  "Ashburn",         // AWS US-East-1, Virginia
+  "Lahore",
+  "Anyang-si",
+  "Amsterdam",
+  "Lanzhou",
+  "Aspen",
+  "Gunnison",
+  "Guthrie",
+] as const;
+
+const buildBotExclusionFilter = (): analyticsdata_v1beta.Schema$FilterExpression => ({
+  notExpression: {
+    filter: {
+      fieldName: "city",
+      inListFilter: {
+        values: [...BOT_CITY_EXCLUSIONS],
+        caseSensitive: false,
+      },
+    },
+  },
+});
+
 const decodeServiceAccount = () => {
   const b64 = process.env.GOOGLE_SERVICE_ACCOUNT_JSON_B64;
   if (!b64) throw new Error("GOOGLE_SERVICE_ACCOUNT_JSON_B64 is not set.");
@@ -62,6 +100,7 @@ export const fetchDailyTimeseries = async (
       dateRanges: [{ startDate, endDate }],
       dimensions: [{ name: "date" }],
       metrics: GA4_METRIC_NAMES.map((name) => ({ name })),
+      dimensionFilter: buildBotExclusionFilter(),
       limit: "50000",
     },
   });
@@ -85,6 +124,7 @@ export const fetchDimensionRollup = async (
       dateRanges: [{ startDate, endDate }],
       dimensions: [{ name: dimension }],
       metrics: GA4_METRIC_NAMES.map((name) => ({ name })),
+      dimensionFilter: buildBotExclusionFilter(),
       orderBys: [{ metric: { metricName: "sessions" }, desc: true }],
       limit: String(limit),
     },
