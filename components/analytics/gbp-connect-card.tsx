@@ -25,7 +25,11 @@ const reasonMessages: Record<string, string> = {
   no_locations:
     "Authorization succeeded but no GBP locations were found on that Google account. Make sure the account is a manager or owner of the Business Profile.",
   multiple_locations:
-    "Multiple GBP locations were found on that Google account. The single-location auto-pick is not safe — pick the right Google account at consent time, or contact support.",
+    "Multiple GBP locations were found on that Google account. Use the location picker to choose the right one, or contact support.",
+  not_connected:
+    "No active Google authorization was found. Please run the connect flow again.",
+  single_location_retry:
+    "Only one location is available now — click Connect again to finish linking it.",
   no_refresh_token:
     "Google did not return a refresh token. Try again — make sure you don't already have an active grant for this app (revoke at myaccount.google.com → Security → Third-party apps).",
   session_mismatch: "The session that initiated the connection no longer matches.",

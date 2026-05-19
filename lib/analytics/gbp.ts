@@ -62,7 +62,9 @@ const buildAuthUrl = (state: string): string => {
     response_type: "code",
     scope: GBP_SCOPES.join(" "),
     access_type: "offline",
-    prompt: "consent",
+    // select_account lets the client pick the correct Google account when they
+    // are signed into several; consent forces a refresh_token to be returned.
+    prompt: "select_account consent",
     include_granted_scopes: "true",
     state,
   });
@@ -117,7 +119,7 @@ const refreshAccessToken = async (refreshToken: string): Promise<TokenResponse> 
 };
 
 type GbpAccount = { name: string; accountName?: string; type?: string };
-type GbpLocation = { name: string; title?: string };
+type GbpLocation = { name: string; title?: string; storefrontAddress?: { addressLines?: string[]; locality?: string; administrativeArea?: string } };
 
 const listAccounts = async (accessToken: string): Promise<GbpAccount[]> => {
   const res = await fetch("https://mybusinessaccountmanagement.googleapis.com/v1/accounts", {
@@ -132,7 +134,7 @@ const listLocations = async (accessToken: string, accountName: string): Promise<
   const url = new URL(
     `https://mybusinessbusinessinformation.googleapis.com/v1/${accountName}/locations`
   );
-  url.searchParams.set("readMask", "name,title");
+  url.searchParams.set("readMask", "name,title,storefrontAddress");
   url.searchParams.set("pageSize", "100");
   const res = await fetch(url, { headers: { Authorization: `Bearer ${accessToken}` } });
   if (!res.ok) throw new Error(`listLocations failed: ${res.status} ${await res.text()}`);
@@ -142,8 +144,20 @@ const listLocations = async (accessToken: string, accountName: string): Promise<
 
 type EnumeratedLocation = {
   accountId: string;
+  accountName: string;
   locationId: string;
   locationName: string;
+  address: string | null;
+};
+
+const formatAddress = (loc: GbpLocation): string | null => {
+  const a = loc.storefrontAddress;
+  if (!a) return null;
+  const parts = [
+    ...(a.addressLines ?? []),
+    [a.locality, a.administrativeArea].filter(Boolean).join(", "),
+  ].filter(Boolean);
+  return parts.length ? parts.join(", ") : null;
 };
 
 const enumerateAllLocations = async (accessToken: string): Promise<EnumeratedLocation[]> => {
@@ -154,12 +168,25 @@ const enumerateAllLocations = async (accessToken: string): Promise<EnumeratedLoc
     for (const loc of locations) {
       out.push({
         accountId: acc.name,
+        accountName: acc.accountName || acc.name,
         locationId: loc.name,
         locationName: loc.title || loc.name,
+        address: formatAddress(loc),
       });
     }
   }
   return out;
+};
+
+/**
+ * Re-enumerate locations using the refresh token already stored for a site.
+ * Used by the location picker (callback persists the refresh token before
+ * enumeration, so the picker is the source of truth — no candidate list is
+ * stuffed into URL/state).
+ */
+const enumerateLocationsForSite = async (siteId: number): Promise<EnumeratedLocation[]> => {
+  const accessToken = await getValidAccessToken(siteId);
+  return enumerateAllLocations(accessToken);
 };
 
 const storeRefreshToken = async (siteId: number, refreshToken: string): Promise<void> => {
@@ -353,6 +380,7 @@ export {
   exchangeCodeForTokens,
   refreshAccessToken,
   enumerateAllLocations,
+  enumerateLocationsForSite,
   storeRefreshToken,
   loadRefreshToken,
   deleteRefreshToken,
