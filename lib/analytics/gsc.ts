@@ -4,7 +4,9 @@ import { google, type searchconsole_v1 } from "googleapis";
 import type { GscMetrics } from "./types";
 
 const GSC_SCOPES = [
-  "https://www.googleapis.com/auth/webmasters.readonly",
+  // Write scope is required for sitemaps.submit; it also covers all read calls,
+  // so we don't need to keep the readonly scope alongside it.
+  "https://www.googleapis.com/auth/webmasters",
 ];
 
 const decodeServiceAccount = () => {
@@ -134,6 +136,18 @@ export const fetchDimensionRollup = async (
       position: r.position,
     },
   }));
+};
+
+/**
+ * Tell Google Search Console to re-read the given sitemap for siteUrl.
+ * The service account must be added as a property user with Full permission.
+ */
+export const submitSitemapToGsc = async (
+  siteUrl: string,
+  sitemapUrl: string,
+): Promise<void> => {
+  const client = getClient();
+  await client.sitemaps.submit({ siteUrl, feedpath: sitemapUrl });
 };
 
 /**

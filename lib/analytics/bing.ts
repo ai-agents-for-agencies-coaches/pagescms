@@ -156,6 +156,20 @@ export const fetchTopPages = async (
   );
 };
 
+/**
+ * Ask Bing to re-fetch the given sitemap for siteUrl. Bing returns an empty
+ * envelope on success and a non-2xx (handled by `request`) on failure.
+ */
+export const submitSitemapToBing = async (
+  siteUrl: string,
+  sitemapUrl: string,
+): Promise<void> => {
+  await request<unknown>("SubmitSitemap", {
+    method: "POST",
+    body: { siteUrl, feedUrl: sitemapUrl },
+  });
+};
+
 export const probeConnection = async (
   siteUrl: string,
 ): Promise<{ ok: true } | { ok: false; reason: string }> => {

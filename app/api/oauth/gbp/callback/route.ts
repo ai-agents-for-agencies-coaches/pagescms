@@ -78,13 +78,12 @@ export async function GET(request: Request): Promise<Response> {
     }
 
     if (locations.length > 1) {
-      return NextResponse.redirect(
-        settingsUrl(owner, repo, {
-          gbp: "error",
-          reason: "multiple_locations",
-          count: String(locations.length),
-        })
+      // Refresh token is already stored above, so the picker can re-enumerate
+      // and let the client choose the correct account + location.
+      const picker = new URL(
+        `${getBaseUrl()}/${owner}/${repo}/analytics/gbp/select`
       );
+      return NextResponse.redirect(picker.toString());
     }
 
     const loc = locations[0];
