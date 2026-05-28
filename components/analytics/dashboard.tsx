@@ -66,6 +66,8 @@ const TABS = [
 
 const formatNumber = (n: number) => new Intl.NumberFormat("en-US").format(n);
 const formatPct = (n: number) => `${(n * 100).toFixed(1)}%`;
+// Relative change as a fraction; mirrors the server-side delta convention.
+const pct = (a: number, b: number) => (b === 0 ? (a > 0 ? 1 : 0) : (a - b) / b);
 
 type PillOption<T extends string> = { label: string; value: T };
 
@@ -175,6 +177,72 @@ export function AnalyticsDashboard({ owner, repo }: Props) {
       : null,
     fetcher,
   );
+
+  // Local-rank KPI cards: resolve the "current" and "prior" run so the cards can
+  // show a prior-period delta. In compare mode they track the two selected runs
+  // (the newer run is current); otherwise it's the latest run vs the run before it.
+  type RankMetrics = {
+    runDate: string;
+    averageRank: number | null;
+    top3Percent: number;
+    foundPercent: number;
+    foundCount: number | null;
+    totalPoints: number | null;
+  };
+  const rankCompare: { current: RankMetrics | null; prior: RankMetrics | null } = (() => {
+    const fromDetail = (d: HeatmapRunDetail | null | undefined): RankMetrics | null => {
+      if (!d || !("averageRank" in d.summary)) return null;
+      return {
+        runDate: d.runDate,
+        averageRank: d.summary.averageRank,
+        top3Percent: d.summary.top3Percent,
+        foundPercent: d.summary.foundPercent,
+        foundCount: d.summary.foundCount,
+        totalPoints: d.summary.totalPoints,
+      };
+    };
+    const latestMetrics = fromDetail(heatmapData?.latest);
+
+    if (compareMode) {
+      const lm = fromDetail(leftHeatmap?.latest);
+      const rm = fromDetail(rightHeatmap?.latest);
+      if (lm && rm) {
+        return rm.runDate >= lm.runDate ? { current: rm, prior: lm } : { current: lm, prior: rm };
+      }
+      // Compare runs still loading — keep showing the latest run with no delta yet.
+      return { current: rm ?? lm ?? latestMetrics, prior: null };
+    }
+
+    if (!latestMetrics) return { current: null, prior: null };
+    const hist = heatmapData?.history ?? [];
+    const idx = hist.findIndex((h) => h.runDate === latestMetrics.runDate);
+    const p = idx > 0 ? hist[idx - 1] : null;
+    return {
+      current: latestMetrics,
+      prior: p
+        ? {
+            runDate: p.runDate,
+            averageRank: p.averageRank,
+            top3Percent: p.top3Percent,
+            foundPercent: p.foundPercent,
+            foundCount: null,
+            totalPoints: null,
+          }
+        : null,
+    };
+  })();
+  const rankDeltas = (() => {
+    const c = rankCompare.current;
+    const p = rankCompare.prior;
+    if (!c || !p) return null;
+    return {
+      // Avg rank is lower-is-better, so invert the args (positive = improvement),
+      // matching the "Avg position" card.
+      avgRank: c.averageRank != null && p.averageRank != null ? pct(p.averageRank, c.averageRank) : null,
+      top3: pct(c.top3Percent, p.top3Percent),
+      visibility: pct(c.foundPercent, p.foundPercent),
+    };
+  })();
 
   const s = summaryData?.summary;
 
@@ -884,32 +952,52 @@ export function AnalyticsDashboard({ owner, repo }: Props) {
               ) : (
                 <>
                   {/* KPIs */}
-                  {"averageRank" in heatmapData.latest.summary && (
+                  {rankCompare.current && (
                     <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                       <KpiCard
                         label="Avg rank"
                         value={
-                          heatmapData.latest.summary.averageRank != null
-                            ? Number(heatmapData.latest.summary.averageRank).toFixed(1)
+                          rankCompare.current.averageRank != null
+                            ? Number(rankCompare.current.averageRank).toFixed(1)
                             : "—"
                         }
-                        delta={null}
-                        sublabel={`${heatmapData.latest.summary.foundCount}/${heatmapData.latest.summary.totalPoints} cells found`}
+                        delta={rankDeltas?.avgRank ?? null}
+                        priorValue={
+                          rankCompare.prior?.averageRank != null
+                            ? Number(rankCompare.prior.averageRank).toFixed(1)
+                            : null
+                        }
+                        sublabel={
+                          rankCompare.current.foundCount != null && rankCompare.current.totalPoints != null
+                            ? `${rankCompare.current.foundCount}/${rankCompare.current.totalPoints} cells found`
+                            : undefined
+                        }
                       />
                       <KpiCard
                         label="Top 3 share"
-                        value={`${Number(heatmapData.latest.summary.top3Percent).toFixed(0)}%`}
-                        delta={null}
+                        value={`${Number(rankCompare.current.top3Percent).toFixed(0)}%`}
+                        delta={rankDeltas?.top3 ?? null}
+                        priorValue={
+                          rankCompare.prior
+                            ? `${Number(rankCompare.prior.top3Percent).toFixed(0)}%`
+                            : null
+                        }
                       />
                       <KpiCard
                         label="Visibility"
-                        value={`${Number(heatmapData.latest.summary.foundPercent).toFixed(0)}%`}
-                        delta={null}
+                        value={`${Number(rankCompare.current.foundPercent).toFixed(0)}%`}
+                        delta={rankDeltas?.visibility ?? null}
+                        priorValue={
+                          rankCompare.prior
+                            ? `${Number(rankCompare.prior.foundPercent).toFixed(0)}%`
+                            : null
+                        }
                       />
                       <KpiCard
                         label="Run date"
-                        value={heatmapData.latest.runDate}
+                        value={rankCompare.current.runDate}
                         delta={null}
+                        priorValue={rankCompare.prior?.runDate ?? null}
                       />
                     </div>
                   )}
