@@ -30,6 +30,11 @@ export function KpiCard({ label, value, delta, lowerIsBetter = false, sublabel, 
         ? "text-green-600 dark:text-green-400"
         : "text-red-600 dark:text-red-400";
 
+  const hasPrior = priorValue != null && priorValue !== "";
+  // When there's no delta but a prior value exists, the "Prior period" line below
+  // already conveys the comparison — so skip the redundant "no prior period" text.
+  const deltaText = delta != null ? formatDelta(delta) : hasPrior ? "" : "no prior period";
+
   return (
     <Card>
       <CardHeader className="pb-2">
@@ -37,12 +42,14 @@ export function KpiCard({ label, value, delta, lowerIsBetter = false, sublabel, 
       </CardHeader>
       <CardContent>
         <div className="text-2xl font-semibold">{value}</div>
-        <div className={cn("flex items-center gap-1 text-xs mt-1", tone)}>
-          <Icon className="h-3 w-3" />
-          <span>{delta == null ? "no prior period" : formatDelta(delta)}</span>
-          {sublabel && <span className="text-muted-foreground ml-1">{sublabel}</span>}
-        </div>
-        {priorValue != null && priorValue !== "" && (
+        {(deltaText || sublabel) && (
+          <div className={cn("flex items-center gap-1 text-xs mt-1", tone)}>
+            {deltaText && <Icon className="h-3 w-3" />}
+            {deltaText && <span>{deltaText}</span>}
+            {sublabel && <span className="text-muted-foreground ml-1">{sublabel}</span>}
+          </div>
+        )}
+        {hasPrior && (
           <div className="text-xs text-muted-foreground mt-0.5">Prior period: {priorValue}</div>
         )}
       </CardContent>
