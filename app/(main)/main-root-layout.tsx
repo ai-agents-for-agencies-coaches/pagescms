@@ -1,6 +1,9 @@
+import Link from "next/link";
+import { GraduationCap } from "lucide-react";
 import { User } from "@/components/user";
 import { AdminButton } from "@/components/admin-button";
 import { About } from "@/components/about";
+import { Button } from "@/components/ui/button";
 
 export function MainRootLayout({
   children,
@@ -13,6 +16,12 @@ export function MainRootLayout({
 				<div className="flex items-center gap-2 px-2 py-2 lg:px-4 lg:py-3">
 					<About/>
           <div className="ml-auto flex items-center gap-2">
+            <Button asChild variant="ghost" size="sm">
+              <Link href="/learn">
+                <GraduationCap className="size-4" />
+                Learn
+              </Link>
+            </Button>
             <AdminButton />
 					  <User align="end" />
           </div>
