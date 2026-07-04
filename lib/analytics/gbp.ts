@@ -372,6 +372,235 @@ const fetchDailyTimeseries = async (
     .map(([date, metrics]) => ({ date, metrics }));
 };
 
+// ---------------------------------------------------------------------------
+// Service items (write path)
+//
+// Business Information API. A location's `serviceItems` is either a structured
+// service (tied to a valid serviceTypeId from one of the location's categories)
+// or a free-form service (a custom label under a category). PATCH with
+// updateMask=serviceItems REPLACES THE WHOLE LIST, so callers must always
+// read-modify-write via mergeServiceItems and never blind-overwrite.
+// https://developers.google.com/my-business/reference/businessinformation/rest/v1/locations/patch
+// ---------------------------------------------------------------------------
+
+const BIZINFO_BASE = "https://mybusinessbusinessinformation.googleapis.com/v1";
+
+type GbpServiceLabel = {
+  displayName: string;
+  description?: string;
+  languageCode?: string;
+};
+type StructuredServiceItem = { serviceTypeId: string; description?: string };
+type FreeFormServiceItem = { categoryId: string; label: GbpServiceLabel };
+type ServiceItem = {
+  // Required by the API on each item; whether the business offers this service.
+  isOffered?: boolean;
+  structuredServiceItem?: StructuredServiceItem;
+  freeFormServiceItem?: FreeFormServiceItem;
+};
+
+type GbpServiceType = { serviceTypeId: string; displayName?: string };
+type GbpCategory = {
+  name: string;
+  displayName?: string;
+  serviceTypes?: GbpServiceType[];
+};
+
+type LocationServiceInfo = {
+  locationName: string;
+  title: string | null;
+  regionCode: string | null;
+  serviceItems: ServiceItem[];
+  primaryCategory: GbpCategory | null;
+  additionalCategories: GbpCategory[];
+};
+
+/** Fetch a location's current service items plus its categories. */
+const getLocationServiceInfo = async (
+  accessToken: string,
+  locationName: string
+): Promise<LocationServiceInfo> => {
+  const readMask = "title,serviceItems,categories,storefrontAddress";
+  const url = `${BIZINFO_BASE}/${locationName}?readMask=${encodeURIComponent(readMask)}`;
+  const res = await fetch(url, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  if (!res.ok) {
+    throw new Error(`GBP getLocation failed: ${res.status} ${await res.text()}`);
+  }
+  const json = (await res.json()) as {
+    title?: string;
+    serviceItems?: ServiceItem[];
+    categories?: { primaryCategory?: GbpCategory; additionalCategories?: GbpCategory[] };
+    storefrontAddress?: { regionCode?: string };
+  };
+  return {
+    locationName,
+    title: json.title ?? null,
+    regionCode: json.storefrontAddress?.regionCode ?? null,
+    serviceItems: json.serviceItems ?? [],
+    primaryCategory: json.categories?.primaryCategory ?? null,
+    additionalCategories: json.categories?.additionalCategories ?? [],
+  };
+};
+
+/**
+ * The valid structured service types (serviceTypeId + display name) available
+ * for a set of category resource names, via categories:batchGet (view=FULL).
+ * A location's own `categories` readMask doesn't include serviceTypes, so this
+ * separate call is required to know which structured items are legal.
+ */
+const getCategoryServiceTypes = async (
+  accessToken: string,
+  categoryNames: string[],
+  regionCode = "US",
+  languageCode = "en"
+): Promise<GbpCategory[]> => {
+  const names = categoryNames.filter(Boolean);
+  if (names.length === 0) return [];
+  const params = new URLSearchParams({ view: "FULL", regionCode, languageCode });
+  for (const name of names) params.append("names", name);
+  const url = `${BIZINFO_BASE}/categories:batchGet?${params.toString()}`;
+  const res = await fetch(url, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  if (!res.ok) {
+    throw new Error(`GBP categories:batchGet failed: ${res.status} ${await res.text()}`);
+  }
+  const json = (await res.json()) as { categories?: GbpCategory[] };
+  return json.categories ?? [];
+};
+
+/** Replace a location's service list. PATCH replaces the WHOLE list. */
+const setLocationServiceItems = async (
+  accessToken: string,
+  locationName: string,
+  serviceItems: ServiceItem[]
+): Promise<LocationServiceInfo> => {
+  const url = `${BIZINFO_BASE}/${locationName}?updateMask=serviceItems`;
+  const res = await fetch(url, {
+    method: "PATCH",
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ serviceItems }),
+  });
+  if (!res.ok) {
+    throw new Error(`GBP setServiceItems failed: ${res.status} ${await res.text()}`);
+  }
+  const json = (await res.json()) as {
+    title?: string;
+    serviceItems?: ServiceItem[];
+    categories?: { primaryCategory?: GbpCategory; additionalCategories?: GbpCategory[] };
+    storefrontAddress?: { regionCode?: string };
+  };
+  return {
+    locationName,
+    title: json.title ?? null,
+    regionCode: json.storefrontAddress?.regionCode ?? null,
+    serviceItems: json.serviceItems ?? [],
+    primaryCategory: json.categories?.primaryCategory ?? null,
+    additionalCategories: json.categories?.additionalCategories ?? [],
+  };
+};
+
+/** Stable identity for a service item, used to dedupe on merge. */
+const serviceItemKey = (item: ServiceItem): string => {
+  if (item.structuredServiceItem) {
+    return `structured:${item.structuredServiceItem.serviceTypeId}`;
+  }
+  if (item.freeFormServiceItem) {
+    const { categoryId, label } = item.freeFormServiceItem;
+    return `freeform:${categoryId}:${label.displayName.trim().toLowerCase()}`;
+  }
+  return "unknown";
+};
+
+/**
+ * Read-modify-write merge. APPEND-ONLY by design: desired items not already
+ * present are added, existing items are never removed — so a sync can never
+ * wipe services a client set up outside our tooling.
+ */
+const mergeServiceItems = (
+  current: ServiceItem[],
+  desired: ServiceItem[]
+): { merged: ServiceItem[]; added: ServiceItem[]; unchanged: ServiceItem[] } => {
+  const currentKeys = new Set(current.map(serviceItemKey));
+  const seen = new Set<string>();
+  const added: ServiceItem[] = [];
+  const unchanged: ServiceItem[] = [];
+  for (const item of desired) {
+    const key = serviceItemKey(item);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    if (currentKeys.has(key)) unchanged.push(item);
+    else added.push(item);
+  }
+  return { merged: [...current, ...added], added, unchanged };
+};
+
+/**
+ * Map a plain list of service names to GBP service items ("Both" strategy):
+ * a name matching one of the categories' predefined serviceTypes (by display
+ * name, case-insensitive) becomes a structured item; otherwise it becomes a
+ * free-form item under the primary category. Names with no structured match
+ * and no primary category to attach to are returned as `unmapped`.
+ */
+const mapServiceNamesToItems = (
+  names: string[],
+  categories: GbpCategory[],
+  primaryCategoryId: string | null,
+  languageCode = "en"
+): {
+  items: ServiceItem[];
+  structuredCount: number;
+  freeFormCount: number;
+  unmapped: string[];
+} => {
+  const serviceTypeByName = new Map<string, string>();
+  for (const cat of categories) {
+    for (const st of cat.serviceTypes ?? []) {
+      if (st.displayName) {
+        serviceTypeByName.set(st.displayName.trim().toLowerCase(), st.serviceTypeId);
+      }
+    }
+  }
+
+  const items: ServiceItem[] = [];
+  const unmapped: string[] = [];
+  const seen = new Set<string>();
+  let structuredCount = 0;
+  let freeFormCount = 0;
+
+  for (const raw of names) {
+    const name = raw.trim();
+    if (!name) continue;
+    const key = name.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+
+    const serviceTypeId = serviceTypeByName.get(key);
+    if (serviceTypeId) {
+      items.push({ isOffered: true, structuredServiceItem: { serviceTypeId } });
+      structuredCount++;
+    } else if (primaryCategoryId) {
+      items.push({
+        isOffered: true,
+        freeFormServiceItem: {
+          categoryId: primaryCategoryId,
+          label: { displayName: name, languageCode },
+        },
+      });
+      freeFormCount++;
+    } else {
+      unmapped.push(name);
+    }
+  }
+
+  return { items, structuredCount, freeFormCount, unmapped };
+};
+
 export {
   GBP_PROVIDER_KEY,
   buildAuthState,
@@ -388,6 +617,21 @@ export {
   clearGbpConnectionOnSite,
   getValidAccessToken,
   fetchDailyTimeseries,
+  getLocationServiceInfo,
+  getCategoryServiceTypes,
+  setLocationServiceItems,
+  mergeServiceItems,
+  serviceItemKey,
+  mapServiceNamesToItems,
 };
 
-export type { EnumeratedLocation };
+export type {
+  EnumeratedLocation,
+  ServiceItem,
+  StructuredServiceItem,
+  FreeFormServiceItem,
+  GbpServiceLabel,
+  GbpCategory,
+  GbpServiceType,
+  LocationServiceInfo,
+};
