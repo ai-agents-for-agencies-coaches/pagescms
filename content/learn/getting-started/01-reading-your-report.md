@@ -10,6 +10,8 @@ youtubeId: ""
 Your dashboard pulls together everything happening across your website, Google
 Business Profile, and search rankings into one place. Here's how to read it.
 
+👉 [Open your Analytics dashboard](dashboard:analytics) to follow along.
+
 ## The KPI cards
 
 At the top of the dashboard you'll see a row of cards. Each shows a **current

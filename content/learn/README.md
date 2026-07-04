@@ -69,11 +69,37 @@ Keep `categoryLabel` and `categoryOrder` identical across every file in a folder
 
 Leave `youtubeId` blank or remove the line for a text-only lesson.
 
-## Images
+## Deep links into the dashboard
 
-- Simplest: reference an external URL.
-- Or drop the image in the app's `public/` folder and reference it by its path
-  (e.g. a file at `public/learn-images/foo.png` is `/learn-images/foo.png`).
+Lessons can link straight to the section of the dashboard they describe using a
+`dashboard:` link. These resolve to the **current client's** real routes when a
+client views the lesson in their portal, so you never hardcode an owner/repo:
+
+```markdown
+[Open your Analytics](dashboard:analytics)
+[Edit your content](dashboard:content)
+[Back to Learn](dashboard:learn)
+```
+
+| Token                  | Goes to                                             |
+| ---------------------- | --------------------------------------------------- |
+| `dashboard:analytics`  | the client's Analytics dashboard                    |
+| `dashboard:content`    | the CMS home (collections) on their default branch  |
+| `dashboard:learn`      | the client's Learn portal                           |
+
+In the global `/learn` view (before a client is selected) these fall back to the
+projects home.
+
+## Screenshots and images
+
+- Drop image files in **`public/learn-images/`** and reference them by path:
+
+  ```markdown
+  ![The Analytics dashboard](/learn-images/analytics-overview.png)
+  ```
+
+- External URLs also work: `![alt](https://…/image.png)`.
+- Only reference an image once the file actually exists, or it renders broken.
 
 ## Adding a new category
 

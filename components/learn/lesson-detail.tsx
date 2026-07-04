@@ -6,6 +6,40 @@ import { getLesson, getLessonCategories } from "@/lib/learn";
 import { cn } from "@/lib/utils";
 
 /**
+ * Resolve `dashboard:*` links authored in lessons to the current client's real
+ * dashboard routes. The repo root is derived from basePath
+ * (`/owner/repo/learn` → `/owner/repo`); `/owner/repo` itself redirects to the
+ * CMS home on the default branch, so content links need no branch. In the
+ * global `/learn` view there is no client, so links fall back to the projects
+ * home.
+ *
+ * Supported tokens: dashboard:analytics, dashboard:content (or :home),
+ * dashboard:learn. Anything else is appended to the repo root as-is.
+ */
+const resolveDashboardLinks = (html: string, basePath: string): string => {
+  const repoRoot = basePath === "/learn" ? null : basePath.replace(/\/learn$/, "");
+  const hrefFor = (target: string): string => {
+    if (!repoRoot) return "/";
+    switch (target) {
+      case "analytics":
+        return `${repoRoot}/analytics`;
+      case "learn":
+        return `${repoRoot}/learn`;
+      case "":
+      case "home":
+      case "content":
+        return repoRoot;
+      default:
+        return `${repoRoot}/${target}`;
+    }
+  };
+  return html.replace(
+    /href="dashboard:([^"]*)"/g,
+    (_match, target: string) => `href="${hrefFor(target)}"`,
+  );
+};
+
+/**
  * A single lesson, rendered both at `/learn/...` and `/[owner]/[repo]/learn/...`.
  * `basePath` prefixes every internal link (sidebar, prev/next, and the
  * authored `/learn/...` cross-links inside the markdown body).
@@ -35,6 +69,9 @@ export async function LessonDetail({
   if (basePath !== "/learn") {
     html = html.replace(/href="\/learn(?=[/"])/g, `href="${basePath}`);
   }
+
+  // Resolve `dashboard:*` deep links to the current client's real routes.
+  html = resolveDashboardLinks(html, basePath);
 
   // Flatten for prev/next across the whole library, in display order.
   const ordered = categories.flatMap((c) => c.lessons);

@@ -13,10 +13,13 @@ without touching code.
 
 ## Opening a collection
 
-1. From the projects home, open your website.
+1. [Open your content dashboard](dashboard:content).
 2. In the left sidebar, pick the collection you want to edit (for example
    **Pages** or **Blog**).
 3. Click an entry to open it in the editor, or use **New** to create one.
+
+When you're done here, you can jump straight to
+[your Analytics](dashboard:analytics) to see how changes are landing.
 
 ## Making changes
 
