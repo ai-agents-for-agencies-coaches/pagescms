@@ -61,6 +61,7 @@ import {
   ArrowLeft,
   ArrowUpRight,
   BarChart3,
+  GraduationCap,
   ChevronRight,
   ChevronsUpDown,
   Database,
@@ -366,6 +367,13 @@ export function RepoSidebar() {
       label: "Analytics",
       href: `/${config.owner}/${config.repo}/analytics`,
       icon: <BarChart3 className="size-4" />,
+    });
+
+    items.push({
+      key: "learn",
+      label: "Learn",
+      href: `/learn`,
+      icon: <GraduationCap className="size-4" />,
     });
 
     return items;
