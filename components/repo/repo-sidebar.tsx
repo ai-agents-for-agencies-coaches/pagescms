@@ -372,7 +372,7 @@ export function RepoSidebar() {
     items.push({
       key: "learn",
       label: "Learn",
-      href: `/learn`,
+      href: `/${config.owner}/${config.repo}/learn`,
       icon: <GraduationCap className="size-4" />,
     });
 
