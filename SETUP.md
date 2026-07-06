@@ -20,6 +20,13 @@ cd pagescms
 npm install
 ```
 
+> Clone this as its own standalone project, in a **sibling folder next to your site builder, not inside it**. The Cockpit is a separate Next.js app with its own dependencies and its own Vercel deploy, so nesting it inside the site-builder repo causes git and tooling conflicts. Example layout:
+> ```
+> projects/
+> ├── autonomous-agency-starter/   (site builder, deploys to Netlify)
+> └── pagescms/                    (your Cockpit fork, deploys to Vercel)
+> ```
+
 ## 2. Create a Postgres database (Neon, free)
 Go to neon.tech, create a project, and copy the connection string into `DATABASE_URL`. (Supabase or Vercel Postgres work too.)
 
