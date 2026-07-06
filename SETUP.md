@@ -74,7 +74,7 @@ See `.env.local.example` for the full list. Add them in Vercel and redeploy when
 ## Pulling upstream updates
 Your fork stays linked to the source. To get new features:
 ```
-git remote add upstream https://github.com/geopopos/pagescms.git
+git remote add upstream https://github.com/ai-agents-for-agencies-coaches/pagescms.git
 git fetch upstream && git merge upstream/main
 ```
 Push to your fork and Vercel redeploys automatically.
