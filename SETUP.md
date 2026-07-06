@@ -5,7 +5,7 @@ Deploy your own copy of the Client Cockpit with Claude Code driving the Vercel C
 **Time:** about 15 minutes. **Accounts (free):** GitHub, Vercel, Resend. The database is provisioned from the CLI, so no separate database signup.
 
 ## 1. Fork, clone, and open in Claude Code
-Click **Fork** to create `your-username/pagescms`, then:
+Fork the repo here: **https://github.com/ai-agents-for-agencies-coaches/pagescms** (click **Fork**) to create `your-username/pagescms`, then:
 ```
 gh repo clone your-username/pagescms
 cd pagescms
