@@ -208,6 +208,13 @@ const analyticsSiteTable = pgTable("analytics_site", {
   gbpLocationId: text("gbp_location_id"),
   gbpLocationName: text("gbp_location_name"),
   gbpConnectedAt: timestamp("gbp_connected_at"),
+  // Zernio-hosted Google Business Profile connect. Deliberately separate from the gbp_*
+  // columns above: those belong to our own Google OAuth app, which every reader of
+  // gbpAccountId still expects. Both flows can run side by side.
+  zernioProfileId: text("zernio_profile_id"),
+  zernioAccountId: text("zernio_account_id"),
+  zernioLocationName: text("zernio_location_name"),
+  zernioConnectedAt: timestamp("zernio_connected_at"),
   llmMentionsEnabled: boolean("llm_mentions_enabled").notNull().default(false),
   llmMentionsCompetitors: jsonb("llm_mentions_competitors").notNull().default(sql`'[]'::jsonb`),
   digestEnabled: boolean("digest_enabled").notNull().default(false),

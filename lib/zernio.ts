@@ -62,19 +62,63 @@ export async function zernio(
   return json;
 }
 
-export async function listGoogleBusinessLocations(profileId: string) {
-  return zernio("GET", "/connect/googlebusiness/locations", { query: { profileId } });
+export async function listGoogleBusinessLocations(
+  profileId: string,
+  tokens: { pendingDataToken?: string; tempToken?: string } = {}
+) {
+  return zernio("GET", "/connect/googlebusiness/locations", {
+    query: {
+      profileId,
+      pendingDataToken: tokens.pendingDataToken,
+      tempToken: tokens.tempToken,
+    },
+  });
 }
 
-export async function selectGoogleBusinessLocation(
-  profileId: string,
-  locationName: string
-) {
+/**
+ * Complete the headless GBP selection.
+ *
+ * Note the shape: Zernio wants the bare `locationId`, plus the `pendingDataToken` the OAuth
+ * redirect handed us. An earlier version of this posted `{ profileId, locationName }`, which
+ * the API rejects — `name` in the locations payload is the BUSINESS name, not a resource id.
+ */
+export async function selectGoogleBusinessLocation(args: {
+  profileId: string;
+  locationId: string;
+  pendingDataToken?: string;
+  accountId?: string;
+}) {
   return zernio("POST", "/connect/googlebusiness/select-location", {
-    body: { profileId, locationName },
+    body: {
+      profileId: args.profileId,
+      locationId: args.locationId,
+      pendingDataToken: args.pendingDataToken,
+      accountId: args.accountId,
+    },
   });
 }
 
 export async function listAccounts(profileId: string) {
   return zernio("GET", "/accounts", { query: { profileId } });
+}
+
+/** The connected googlebusiness account for a profile, or null if none is connected yet. */
+export async function findGoogleBusinessAccount(profileId: string) {
+  const accounts = await listAccounts(profileId);
+  const list = accounts?.accounts ?? accounts?.data ?? [];
+  if (!Array.isArray(list)) return null;
+  return list.find((a: any) => a?.platform === "googlebusiness") ?? null;
+}
+
+/** One Zernio profile per client. Created on demand the first time a site connects. */
+export async function createProfile(name: string) {
+  const data = await zernio("POST", "/profiles", { body: { name } });
+  const profile = data?.profile ?? data?.data ?? data;
+  const id = profile?._id ?? profile?.id ?? null;
+  if (!id) {
+    throw new Error(
+      `Zernio created no profile id for "${name}": ${JSON.stringify(data).slice(0, 200)}`
+    );
+  }
+  return String(id);
 }
