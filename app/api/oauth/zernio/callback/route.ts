@@ -9,6 +9,7 @@ import {
   listGoogleBusinessLocations,
   selectGoogleBusinessLocation,
   findGoogleBusinessAccount,
+  ZernioApiError,
 } from "@/lib/zernio";
 
 /**
@@ -154,8 +155,12 @@ export async function GET(request: Request): Promise<Response> {
        <ul>${rows}</ul>`
     );
   } catch (error) {
+    // Auth failures should read as auth failures. A Zernio 401/403 is a different thing
+    // entirely, so it must not be mistaken for the caller lacking access.
     const status = (error as { status?: number })?.status;
-    if (status === 401 || status === 403) return toErrorResponse(error);
+    if (!(error instanceof ZernioApiError) && (status === 401 || status === 403)) {
+      return toErrorResponse(error);
+    }
     return fail((error as Error).message);
   }
 }

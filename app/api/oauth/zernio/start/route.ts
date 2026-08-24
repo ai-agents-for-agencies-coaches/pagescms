@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { getBaseUrl } from "@/lib/base-url";
 import { toErrorResponse } from "@/lib/api-error";
-import { zernio, ZERNIO_CONFIGURED } from "@/lib/zernio";
+import { zernio, ZERNIO_CONFIGURED, ZernioApiError } from "@/lib/zernio";
 import { requireSiteForRepo, ensureZernioProfile } from "@/lib/zernio-connect";
 
 /**
@@ -61,9 +61,12 @@ export async function GET(request: Request): Promise<Response> {
 
     return NextResponse.redirect(authUrl);
   } catch (error) {
-    // Auth failures should read as auth failures, not as a broken connect flow.
+    // Auth failures should read as auth failures. A Zernio 401/403 is a different thing
+    // entirely, so it must not be mistaken for the caller lacking access.
     const status = (error as { status?: number })?.status;
-    if (status === 401 || status === 403) return toErrorResponse(error);
+    if (!(error instanceof ZernioApiError) && (status === 401 || status === 403)) {
+      return toErrorResponse(error);
+    }
 
     return NextResponse.redirect(
       `${back}?zernio=error&reason=${encodeURIComponent((error as Error).message)}`

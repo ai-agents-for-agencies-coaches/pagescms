@@ -33,6 +33,9 @@ export async function GET(request: NextRequest) {
       timezone: analyticsSiteTable.timezone,
       gbpLocationName: analyticsSiteTable.gbpLocationName,
       gbpConnectedAt: analyticsSiteTable.gbpConnectedAt,
+      zernioAccountId: analyticsSiteTable.zernioAccountId,
+      zernioLocationName: analyticsSiteTable.zernioLocationName,
+      zernioConnectedAt: analyticsSiteTable.zernioConnectedAt,
       lastSyncedAt: analyticsSiteTable.lastSyncedAt,
     })
     .from(analyticsSiteTable)
@@ -59,6 +62,14 @@ export async function GET(request: NextRequest) {
         timezone: s.timezone,
         gbp: s.gbpLocationName
           ? { locationName: s.gbpLocationName, connectedAt: s.gbpConnectedAt }
+          : null,
+        // The Zernio-hosted GBP connection, which is separate from `gbp` above.
+        zernioGbp: s.zernioAccountId
+          ? {
+              accountId: s.zernioAccountId,
+              locationName: s.zernioLocationName,
+              connectedAt: s.zernioConnectedAt,
+            }
           : null,
         keywords: {
           total: counts?.total ?? 0,
