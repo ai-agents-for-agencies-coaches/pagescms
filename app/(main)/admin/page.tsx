@@ -15,7 +15,6 @@ import {
   userTable,
 } from "@/db/schema";
 import { DocumentTitle } from "@/components/document-title";
-import { AdminTabs } from "@/components/admin-tabs";
 import { AdminConfirmActionButton } from "@/components/admin-confirm-action-button";
 import { AdminTimeAgo } from "@/components/admin-time-ago";
 import { AdminUserSearch } from "@/components/admin-user-search";
@@ -194,8 +193,6 @@ export default async function Page({
             Admin
           </h1>
         </header>
-
-        <AdminTabs current="overview" />
 
         <div className="space-y-6">
           <Card>

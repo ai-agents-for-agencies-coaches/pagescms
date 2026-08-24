@@ -61,6 +61,7 @@ import {
   ArrowLeft,
   ArrowUpRight,
   BarChart3,
+  Plug,
   GraduationCap,
   ChevronRight,
   ChevronsUpDown,
@@ -367,6 +368,15 @@ export function RepoSidebar() {
       label: "Analytics",
       href: `/${config.owner}/${config.repo}/analytics`,
       icon: <BarChart3 className="size-4" />,
+    });
+
+    // Deliberately not behind canManageRepo: an invited client has no GitHub identity but
+    // should still be able to connect and manage their own Google Business Profile.
+    items.push({
+      key: "admin-integrations",
+      label: "Integrations",
+      href: `/${config.owner}/${config.repo}/integrations`,
+      icon: <Plug className="size-4" />,
     });
 
     items.push({

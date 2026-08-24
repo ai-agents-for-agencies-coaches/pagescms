@@ -3,7 +3,8 @@ import { eq } from "drizzle-orm";
 import { db } from "@/db";
 import { analyticsSiteTable } from "@/db/schema";
 import { getBaseUrl } from "@/lib/base-url";
-import { requireAdminSession } from "@/lib/admin";
+import { toErrorResponse } from "@/lib/api-error";
+import { requireSiteForRepo } from "@/lib/zernio-connect";
 import {
   listGoogleBusinessLocations,
   selectGoogleBusinessLocation,
@@ -15,18 +16,16 @@ import {
  *
  * The start route does NOT ask for headless mode, so Zernio hosts the location picker itself
  * and the account already exists by the time the browser lands here. The normal path is
- * therefore just: read the connected account off the profile and write it to the site.
+ * therefore just: read the connected account off the profile, write it to the site, and send
+ * the user back to their Integrations page.
  *
  * Zernio can still hand back `step=select_location` with a token when it wants US to render
- * the picker. That branch is kept so the flow does not dead-end, and it now posts the shape
- * the API actually documents: a bare `locationId` plus the `pendingDataToken` from the
- * redirect. The previous version posted `locationName`, which the API rejects.
- *
- *   GET /api/oauth/zernio/callback?profileId=...&siteId=...
- *   GET /api/oauth/zernio/callback?profileId=...&select=<locationId>   (picker branch)
+ * the picker. That branch is kept so the flow does not dead-end, and it posts the shape the
+ * API actually documents: a bare `locationId` plus the `pendingDataToken` from the redirect.
+ * An earlier version posted `locationName`, which the API rejects.
  */
 
-/** These pages interpolate query params, so everything untrusted goes through here. */
+/** This page interpolates query params, so everything untrusted goes through here. */
 const esc = (value: unknown) =>
   String(value ?? "").replace(
     /[&<>"']/g,
@@ -40,7 +39,7 @@ const esc = (value: unknown) =>
       })[c] as string,
   );
 
-const html = (title: string, body: string, status = 200) =>
+const pickerPage = (title: string, body: string, status = 200) =>
   new NextResponse(
     `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
      <title>${title}</title>
@@ -57,67 +56,35 @@ const html = (title: string, body: string, status = 200) =>
     { status, headers: { "content-type": "text/html; charset=utf-8" } }
   );
 
-/** Write the connected account back to the site, so nobody has to copy an id by hand. */
-const persist = async (siteId: number, account: any) => {
-  const accountId = account?._id ?? account?.id ?? account?.accountId ?? null;
-  if (!accountId) return null;
-
-  await db
-    .update(analyticsSiteTable)
-    .set({
-      zernioAccountId: String(accountId),
-      zernioLocationName:
-        account?.selectedLocationName ??
-        account?.displayName ??
-        account?.username ??
-        null,
-      zernioConnectedAt: new Date(),
-      updatedAt: new Date(),
-    })
-    .where(eq(analyticsSiteTable.id, siteId));
-
-  return String(accountId);
-};
-
 export async function GET(request: Request): Promise<Response> {
-  try {
-    await requireAdminSession();
-  } catch {
-    return html("Admin access required", `<p>Sign in as an admin and try again.</p>`, 403);
-  }
-
   const url = new URL(request.url);
-  const profileId = url.searchParams.get("profileId");
+  const owner = url.searchParams.get("owner");
+  const repo = url.searchParams.get("repo");
   const select = url.searchParams.get("select");
-  const label = url.searchParams.get("label") ?? "this client";
   const oauthError = url.searchParams.get("error");
-  const siteIdParam = url.searchParams.get("siteId");
-  const siteId = siteIdParam ? Number.parseInt(siteIdParam, 10) : NaN;
-  const hasSite = Number.isFinite(siteId);
 
   // Zernio hands these back when it wants us to render the picker.
   const pendingDataToken = url.searchParams.get("pendingDataToken") ?? undefined;
   const tempToken = url.searchParams.get("tempToken") ?? undefined;
 
-  const backToAdmin = `${getBaseUrl()}/admin/integrations`;
-
-  if (oauthError) {
-    if (hasSite) {
-      return NextResponse.redirect(
-        `${backToAdmin}?error=${encodeURIComponent(oauthError)}`
-      );
-    }
-    return html(
-      "Connection cancelled",
-      `<p>Google returned <code>${esc(oauthError)}</code>. Nothing was connected.</p>`,
-      400
+  if (!owner || !repo) {
+    return NextResponse.json(
+      { status: "error", message: "Missing owner or repo." },
+      { status: 400 }
     );
   }
-  if (!profileId) {
-    return html("Missing profileId", `<p>No Zernio profile was supplied.</p>`, 400);
-  }
+
+  const back = `${getBaseUrl()}/${owner}/${repo}/integrations`;
+  const fail = (reason: string) =>
+    NextResponse.redirect(`${back}?zernio=error&reason=${encodeURIComponent(reason)}`);
+
+  if (oauthError) return fail(oauthError);
 
   try {
+    const site = await requireSiteForRepo(owner, repo);
+    const profileId = site.zernioProfileId;
+    if (!profileId) return fail("not_started");
+
     if (select) {
       await selectGoogleBusinessLocation({
         profileId,
@@ -129,23 +96,27 @@ export async function GET(request: Request): Promise<Response> {
     const account = await findGoogleBusinessAccount(profileId);
 
     if (account) {
-      const accountId = hasSite ? await persist(siteId, account) : null;
+      const accountId = account?._id ?? account?.id ?? account?.accountId ?? null;
+      if (!accountId) return fail("no_account_id");
 
-      if (hasSite) {
-        return NextResponse.redirect(
-          `${backToAdmin}?connected=${encodeURIComponent(label)}`
-        );
-      }
+      const locationName =
+        account?.selectedLocationName ??
+        account?.displayName ??
+        account?.username ??
+        null;
 
-      const rawId = accountId ?? account?._id ?? account?.id ?? "not returned";
-      return html(
-        "Connected",
-        `<p><strong>${esc(label)}</strong> is connected to Google Business Profile.</p>
-         <p>Zernio account id:</p><pre>${esc(rawId)}</pre>
-         <p class="muted">This connection was not attached to a site because no
-         <code>siteId</code> was supplied. Connect from
-         <a href="${backToAdmin}">Admin &rarr; Integrations</a> to have it saved automatically.</p>
-         <pre>${esc(JSON.stringify(account, null, 2))}</pre>`
+      await db
+        .update(analyticsSiteTable)
+        .set({
+          zernioAccountId: String(accountId),
+          zernioLocationName: locationName,
+          zernioConnectedAt: new Date(),
+          updatedAt: new Date(),
+        })
+        .where(eq(analyticsSiteTable.id, site.id));
+
+      return NextResponse.redirect(
+        `${back}?zernio=success&location=${encodeURIComponent(locationName ?? "your location")}`
       );
     }
 
@@ -156,15 +127,7 @@ export async function GET(request: Request): Promise<Response> {
     });
     const items = locations?.locations ?? locations?.data ?? locations ?? [];
 
-    if (!Array.isArray(items) || items.length === 0) {
-      return html(
-        "No locations found",
-        `<p>Google returned no manageable locations for this account.</p>
-         <p class="muted">The profile must be <em>verified</em>, and the Google account that
-         authorized must have manager access to it.</p>
-         <pre>${esc(JSON.stringify(locations, null, 2))}</pre>`
-      );
-    }
+    if (!Array.isArray(items) || items.length === 0) return fail("no_locations");
 
     const rows = items
       .map((loc: any) => {
@@ -173,10 +136,9 @@ export async function GET(request: Request): Promise<Response> {
         const title = loc.name ?? loc.title ?? locationId;
         const address = typeof loc.address === "string" ? loc.address : "";
         const href = new URL(`${getBaseUrl()}/api/oauth/zernio/callback`);
-        href.searchParams.set("profileId", profileId);
-        href.searchParams.set("label", label);
+        href.searchParams.set("owner", owner);
+        href.searchParams.set("repo", repo);
         href.searchParams.set("select", locationId);
-        if (hasSite) href.searchParams.set("siteId", String(siteId));
         if (pendingDataToken) href.searchParams.set("pendingDataToken", pendingDataToken);
         if (tempToken) href.searchParams.set("tempToken", tempToken);
         return `<li><a class="btn" href="${esc(href.toString())}">Use this</a> <strong>${esc(title)}</strong>
@@ -185,12 +147,15 @@ export async function GET(request: Request): Promise<Response> {
       })
       .join("");
 
-    return html(
+    return pickerPage(
       "Choose the location to connect",
-      `<p>Authorized. Now pick which Google Business Profile location <strong>${esc(label)}</strong> should post to.</p>
+      `<p>Authorized. Now pick which Google Business Profile location
+       <strong>${esc(`${owner}/${repo}`)}</strong> should use.</p>
        <ul>${rows}</ul>`
     );
   } catch (error) {
-    return html("Connection failed", `<p>${esc((error as Error).message)}</p>`, 502);
+    const status = (error as { status?: number })?.status;
+    if (status === 401 || status === 403) return toErrorResponse(error);
+    return fail((error as Error).message);
   }
 }

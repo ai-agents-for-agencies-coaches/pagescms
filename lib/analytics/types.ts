@@ -41,6 +41,10 @@ export type AnalyticsSiteRow = {
   gbpLocationId: string | null;
   gbpLocationName: string | null;
   gbpConnectedAt: Date | null;
+  zernioProfileId: string | null;
+  zernioAccountId: string | null;
+  zernioLocationName: string | null;
+  zernioConnectedAt: Date | null;
   llmMentionsEnabled: boolean;
   llmMentionsCompetitors: string[];
   digestEnabled: boolean;
