@@ -52,7 +52,7 @@ export function GbpLocationPicker({ owner, repo, locations }: Props) {
         throw new Error(payload?.message || "Failed to save the selected location.");
       }
       router.replace(
-        `/${owner}/${repo}/analytics/settings?gbp=success&location=${encodeURIComponent(
+        `/${owner}/${repo}/integrations?gbp=success&location=${encodeURIComponent(
           loc.locationName
         )}`
       );
@@ -114,7 +114,7 @@ export function GbpLocationPicker({ owner, repo, locations }: Props) {
           variant="outline"
           size="sm"
           disabled={submitting}
-          onClick={() => router.replace(`/${owner}/${repo}/analytics/settings`)}
+          onClick={() => router.replace(`/${owner}/${repo}/integrations`)}
         >
           Cancel
         </Button>

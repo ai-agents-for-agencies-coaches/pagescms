@@ -1,4 +1,5 @@
 import { loadAnalyticsSite } from "@/lib/analytics/repo-context";
+import { GbpConnectCard } from "@/components/analytics/gbp-connect-card";
 import { ZernioGbpCard } from "@/components/integrations/zernio-gbp-card";
 import type { AnalyticsSiteRow } from "@/lib/analytics/types";
 
@@ -18,12 +19,23 @@ export default async function IntegrationsPage(props: {
         </p>
       </div>
       <div className="space-y-4">
-        <ZernioGbpCard
+        <GbpConnectCard
           owner={owner}
           repo={repo}
-          initialLocationName={site?.zernioLocationName ?? null}
-          initialConnectedAt={site?.zernioConnectedAt ?? null}
+          initialLocationName={site?.gbpLocationName ?? null}
+          initialConnectedAt={site?.gbpConnectedAt ?? null}
         />
+        {/* Zernio bills per connected account, so our own Google connection above is the
+            one we offer. The Zernio card only stays for sites already connected there, so
+            they can still disconnect. */}
+        {site?.zernioAccountId && (
+          <ZernioGbpCard
+            owner={owner}
+            repo={repo}
+            initialLocationName={site.zernioLocationName ?? null}
+            initialConnectedAt={site.zernioConnectedAt ?? null}
+          />
+        )}
       </div>
     </div>
   );

@@ -13,26 +13,26 @@ export default async function GbpSelectPage(props: {
   params: Promise<{ owner: string; repo: string }>;
 }) {
   const { owner, repo } = await props.params;
-  const settings = `/${owner}/${repo}/analytics/settings`;
+  const integrations = `/${owner}/${repo}/integrations`;
 
   const site = await loadAnalyticsSite(owner, repo);
-  if (!site) redirect(`${settings}?gbp=error&reason=no_site`);
+  if (!site) redirect(`${integrations}?gbp=error&reason=no_site`);
 
   let locations;
   try {
     locations = await enumerateLocationsForSite(site.id);
   } catch {
     // No stored refresh token / token revoked — send them back to reconnect.
-    redirect(`${settings}?gbp=error&reason=not_connected`);
+    redirect(`${integrations}?gbp=error&reason=not_connected`);
   }
 
   if (locations.length === 0) {
-    redirect(`${settings}?gbp=error&reason=no_locations`);
+    redirect(`${integrations}?gbp=error&reason=no_locations`);
   }
   if (locations.length === 1) {
     // Nothing to choose — bounce back so they can re-run the connect flow,
     // which will auto-pick the single location.
-    redirect(`${settings}?gbp=error&reason=single_location_retry`);
+    redirect(`${integrations}?gbp=error&reason=single_location_retry`);
   }
 
   return (

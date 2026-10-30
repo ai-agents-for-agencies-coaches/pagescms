@@ -33,7 +33,6 @@ const reasonMessages: Record<string, string> = {
   no_refresh_token:
     "Google did not return a refresh token. Try again — make sure you don't already have an active grant for this app (revoke at myaccount.google.com → Security → Third-party apps).",
   session_mismatch: "The session that initiated the connection no longer matches.",
-  no_site: "No analytics site row exists yet — save settings once first.",
   missing_code: "Google did not return an authorization code.",
   access_denied: "You denied the consent screen.",
 };
@@ -106,8 +105,8 @@ export function GbpConnectCard({
         <CardTitle>Google Business Profile</CardTitle>
         <CardDescription>
           {isConnected
-            ? "Connected. PaperClip can now manage posts, reviews, Q&A, and rank tracking on this profile."
-            : "Connect a Google account that has manager or owner access to this site's GBP. The refresh token is encrypted at rest; PaperClip mints short-lived access tokens server-side."}
+            ? "Connected. We use this to report on your profile and manage posts and reviews for you."
+            : "Sign in with a Google account that is an owner or manager of your Business Profile. Your login is stored encrypted, and you can disconnect at any time."}
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-2">

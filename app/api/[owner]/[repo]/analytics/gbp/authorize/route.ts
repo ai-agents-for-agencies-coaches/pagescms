@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { getRepoAnalyticsContext } from "@/lib/analytics/repo-context";
 import { buildAuthState, buildAuthUrl } from "@/lib/analytics/gbp";
-import { createHttpError } from "@/lib/api-error";
+import { requireSiteForRepo } from "@/lib/zernio-connect";
 
 type Params = { owner: string; repo: string };
 
@@ -11,13 +11,9 @@ export async function GET(
 ): Promise<Response> {
   const { owner, repo } = await context.params;
   try {
-    const { user, site } = await getRepoAnalyticsContext({ owner, repo });
-    if (!site) {
-      throw createHttpError(
-        `No analytics site row exists for ${owner}/${repo} — save settings once first.`,
-        404
-      );
-    }
+    const { user } = await getRepoAnalyticsContext({ owner, repo });
+    // Integrations can be reached before anyone has saved analytics settings.
+    await requireSiteForRepo(owner, repo);
 
     const state = await buildAuthState({ owner, repo, userId: user.id });
     const url = buildAuthUrl(state);

@@ -9,14 +9,14 @@ import {
   updateGbpLocationOnSite,
 } from "@/lib/analytics/gbp";
 
-const settingsUrl = (owner: string, repo: string, params: Record<string, string>) => {
-  const url = new URL(`${getBaseUrl()}/${owner}/${repo}/analytics/settings`);
+const returnUrl = (owner: string, repo: string, params: Record<string, string>) => {
+  const url = new URL(`${getBaseUrl()}/${owner}/${repo}/integrations`);
   for (const [k, v] of Object.entries(params)) url.searchParams.set(k, v);
   return url.toString();
 };
 
 const errorRedirect = (owner: string, repo: string, reason: string) =>
-  NextResponse.redirect(settingsUrl(owner, repo, { gbp: "error", reason }));
+  NextResponse.redirect(returnUrl(owner, repo, { gbp: "error", reason }));
 
 export async function GET(request: Request): Promise<Response> {
   const url = new URL(request.url);
@@ -73,7 +73,7 @@ export async function GET(request: Request): Promise<Response> {
 
     if (locations.length === 0) {
       return NextResponse.redirect(
-        settingsUrl(owner, repo, { gbp: "error", reason: "no_locations" })
+        returnUrl(owner, repo, { gbp: "error", reason: "no_locations" })
       );
     }
 
@@ -90,7 +90,7 @@ export async function GET(request: Request): Promise<Response> {
     await updateGbpLocationOnSite(site.id, loc.accountId, loc.locationId, loc.locationName);
 
     return NextResponse.redirect(
-      settingsUrl(owner, repo, { gbp: "success", location: loc.locationName })
+      returnUrl(owner, repo, { gbp: "success", location: loc.locationName })
     );
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown error";
